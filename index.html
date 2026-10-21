@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Verteilerplan">
+<title>Verteilerplan · Elektrotechnik Schilling</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="plan.css">
+<link rel="stylesheet" href="app.css">
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" defer></script>
+<script src="plan.js" defer></script>
+<script src="bogen-import.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="leiste">
+  <div class="leiste-innen">
+    <img class="leiste-logo" src="logo.webp" alt="Elektrotechnik Schilling">
+    <nav class="schritte" aria-label="Schritte">
+      <button type="button" data-ansicht="daten"><span>1</span> Daten</button>
+      <button type="button" data-ansicht="verteiler"><span>2</span> Verteiler</button>
+      <button type="button" data-ansicht="plan"><span>3</span> Plan</button>
+    </nav>
+    <button type="button" class="knopf leise" id="knopf-start">Neu / Öffnen</button>
+  </div>
+</header>
+
+<main>
+  <section id="ansicht-start" class="ansicht">
+    <div class="start">
+      <h1>Verteilerplan erstellen</h1>
+      <p class="start-text">Aus dem in Craftnote ausgefüllten Aufnahmebogen wird hier der fertige Verteilerplan. Alles bleibt auf diesem Gerät – es wird nichts hochgeladen.</p>
+      <div class="start-wahl">
+        <button type="button" class="kachel haupt" data-aktion="bogen">
+          <b>Aufnahmebogen öffnen</b>
+          <small>Die in Craftnote ausgefüllte PDF auswählen</small>
+        </button>
+        <button type="button" class="kachel" data-aktion="leer">
+          <b>Leeren Plan anlegen</b>
+          <small>Alles direkt hier eintragen</small>
+        </button>
+        <button type="button" class="kachel" data-aktion="datei">
+          <b>Plan-Datei öffnen</b>
+          <small>Eine gesicherte Plan-Datei (.json) weiter bearbeiten</small>
+        </button>
+        <button type="button" class="kachel" data-aktion="weiter" hidden>
+          <b>Weiter bearbeiten</b>
+          <small id="weiter-name"></small>
+        </button>
+      </div>
+      <p class="start-fehler" id="start-fehler" role="alert" hidden></p>
+    </div>
+  </section>
+
+  <section id="ansicht-daten" class="ansicht" hidden></section>
+  <section id="ansicht-verteiler" class="ansicht" hidden></section>
+
+  <section id="ansicht-plan" class="ansicht" hidden>
+    <div class="plan-leiste">
+      <div id="plan-status"></div>
+      <div class="plan-knoepfe">
+        <button type="button" class="knopf" id="knopf-json">Plan-Datei sichern</button>
+        <button type="button" class="knopf haupt" id="knopf-drucken">PDF speichern / drucken</button>
+      </div>
+    </div>
+    <div class="vorschau" id="vorschau"><div class="vorschau-rahmen" id="vorschau-rahmen"><div id="druck"></div></div></div>
+  </section>
+</main>
+
+<input type="file" id="datei-bogen" accept="application/pdf,.pdf" hidden>
+<input type="file" id="datei-json" accept="application/json,.json" hidden>
+</body>
+</html>

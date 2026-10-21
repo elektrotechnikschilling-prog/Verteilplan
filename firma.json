@@ -1,0 +1,21 @@
+{
+  "name": "Elektrotechnik Schilling",
+  "zusatz": "Elektro- und informationstechnische Systeme",
+  "inhaber": "Björn Schilling",
+  "strasse": "Bachgasse 9",
+  "ort": "63584 Gründau",
+  "telefon": "06058 3820019",
+  "email": "info@elektrotechnik-schilling.de",
+  "web": "www.elektrotechnik-schilling.de",
+
+  "logo": "logo.webp",
+  "logo_hoehe": 17,
+  "logo_ersetzt_namen": true,
+
+  "farbe": "#eab308",
+  "farbe_dunkel": "#0f172a",
+
+  "bmk": true,
+  "hinweis": "Arbeiten an elektrischen Anlagen dürfen nur von Elektrofachkräften ausgeführt werden. Änderungen an der Anlage bitte in diesem Plan nachtragen lassen.",
+  "normhinweis": "Stromkreisverzeichnis in Anlehnung an DIN VDE 0100-510, Abschnitt 514.5 · Betriebsmittelkennzeichen nach DIN EN IEC 81346-2"
+}

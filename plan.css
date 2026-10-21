@@ -1,0 +1,202 @@
+/* Layout von Verteilerplan und Aufnahmebogen. Gemeinsam genutzt von der Web-App (index.html)
+   und der PC-Ausgabe (vorlage/verteilerplan.html ueber erstellen.ps1). Alles haengt an .vp. */
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/barlow@5.2.8/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/barlow@5.2.8/500.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/barlow@5.2.8/600.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/barlow@5.2.8/700.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/barlow-semi-condensed@5.2.7/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/barlow-semi-condensed@5.2.7/500.css");
+
+@page { size: A4; margin: 0; }
+
+.vp, .vp *, .vp *::before, .vp *::after { box-sizing: border-box; }
+
+.vp {
+  --akzent: #f5a400;
+  --dunkel: #14263b;
+  --text: #1a2330;
+  --grau: #66727f;
+  --linie: #d3d9e1;
+  --flaeche: #f2f4f7;
+  /* Dichte "normal" - wird je nach Umfang des Plans automatisch umgeschaltet */
+  --fs: 8.8pt;
+  --zeile: 5.4mm;
+  --streifen: 11.5mm;
+  --abstand: 4.2mm;
+  --spalten: 3.2em 2.3em 3.9em minmax(0, 1fr) 1.5em;
+  font-family: Barlow, Bahnschrift, "Segoe UI", Arial, sans-serif;
+  font-size: 9pt;
+  line-height: 1.25;
+  color: var(--text);
+  text-align: left;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.vp.d-gross   { --fs: 9pt;   --zeile: 6.3mm;  --streifen: 13mm;  --abstand: 5.6mm; }
+.vp.d-kompakt { --fs: 8pt;   --zeile: 4.5mm;  --streifen: 9.8mm; --abstand: 2.8mm; }
+.vp.d-eng     { --fs: 7.8pt; --zeile: 4.15mm; --streifen: 9mm;   --abstand: 2.2mm; }
+.vp.ohne-bmk  { --spalten: 3.2em 3.9em minmax(0, 1fr) 1.5em; }
+
+/* ---------- Blatt ---------- */
+.vp .blatt {
+  width: 210mm;
+  height: 296.6mm;
+  padding: 10mm 12mm 7mm;
+  margin: 8mm auto;
+  background: #fff;
+  box-shadow: 0 1mm 6mm rgba(20, 38, 59, .25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+@media print {
+  .vp .blatt { margin: 0; box-shadow: none; break-after: page; }
+  .vp .blatt:last-of-type { break-after: auto; }
+}
+
+/* ---------- Kopf ---------- */
+.vp .kopf { flex: none; display: flex; justify-content: space-between; align-items: flex-end; gap: 8mm; }
+.vp .firma { display: flex; align-items: center; gap: 3.6mm; min-width: 0; }
+.vp .logo { flex: none; height: var(--logo-h, 15mm); display: flex; align-items: center; }
+.vp .logo img { height: var(--logo-h, 15mm); max-width: 80mm; object-fit: contain; object-position: left center; }
+.vp .logo-ersatz { width: 15mm; height: 15mm; border-radius: 3.2mm; background: var(--dunkel); display: grid; place-items: center; }
+.vp .logo-ersatz svg { width: 8.4mm; height: 8.4mm; fill: var(--akzent); }
+.vp .firma-name { font-size: 15.5pt; font-weight: 700; line-height: 1.08; color: var(--dunkel); }
+.vp .firma-zusatz { margin-top: .9mm; font-size: 7.6pt; color: var(--grau); }
+.vp .titel { flex: none; text-align: right; }
+.vp .titel-klein { font-size: 7.2pt; letter-spacing: .16em; text-transform: uppercase; color: var(--grau); }
+.vp .titel-gross { margin-top: .5mm; font-size: 26pt; font-weight: 700; line-height: 1; letter-spacing: .02em; text-transform: uppercase; color: var(--dunkel); }
+.vp .kopflinie { flex: none; display: flex; align-items: center; margin: 3.2mm 0 3.4mm; }
+.vp .kopflinie i:first-child { width: 34mm; height: 1.3mm; border-radius: .7mm; background: var(--akzent); }
+.vp .kopflinie i:last-child { flex: 1; height: .3mm; background: var(--dunkel); }
+
+.vp .kopf-klein { flex: none; display: flex; justify-content: space-between; align-items: baseline; font-size: 8pt; color: var(--grau); }
+.vp .kopf-klein b { font-size: 10.5pt; color: var(--dunkel); }
+
+/* ---------- Anlagendaten ---------- */
+.vp .meta { flex: none; display: grid; grid-template-columns: 1.15fr 1.3fr 1fr .85fr; row-gap: .6mm; padding: 1.4mm 0; background: var(--flaeche); border-radius: 2mm; }
+.vp .meta > div { min-width: 0; padding: 1.1mm 3.4mm; border-left: .25mm solid #dce1e7; }
+.vp .meta > div:nth-child(4n + 1) { border-left: 0; }
+.vp .m-l { font-size: 6.1pt; letter-spacing: .11em; text-transform: uppercase; color: var(--grau); }
+.vp .m-w { font-size: 9.4pt; font-weight: 600; line-height: 1.2; color: var(--dunkel); white-space: pre-line; overflow-wrap: anywhere; }
+.vp .m-w.offen { font-weight: 400; color: #a3acb7; }
+
+/* ---------- Warnung bei unstimmigen Daten ---------- */
+.vp .warnung { flex: none; margin-top: 3mm; padding: 2mm 3mm; border: .5mm solid #d92d20; border-radius: 1.5mm; background: #fff1f0; color: #b42318; font-size: 8.5pt; }
+.vp .warnung b { display: block; }
+
+/* ---------- Entwurf: offene Punkte aus der Aufnahme ---------- */
+.vp .entwurf { flex: none; margin-top: 3mm; padding: 2mm 3mm; border: .4mm solid #d97706; border-radius: 1.5mm; background: #fffbeb; color: #7c2d12; font-size: 7.6pt; line-height: 1.3; }
+.vp .entwurf b { color: #b45309; letter-spacing: .04em; text-transform: uppercase; }
+.vp .entwurf ol { margin: .9mm 0 0; padding-left: 4.4mm; columns: 2; column-gap: 8mm; }
+.vp .entwurf li { break-inside: avoid; margin-bottom: .5mm; }
+
+/* ---------- Spaltenkopf / Liste ---------- */
+.vp .spaltenkopf { flex: none; display: grid; grid-template-columns: 1fr 1fr; column-gap: 5mm; margin: 3.4mm 0 0 11.6mm; }
+.vp .spaltenkopf > div { display: grid; grid-template-columns: var(--spalten); column-gap: 1.2mm; align-items: end; font-size: var(--fs); padding-bottom: .7mm; border-bottom: .3mm solid var(--dunkel); }
+.vp .spaltenkopf span { font-size: 5.9pt; letter-spacing: .09em; text-transform: uppercase; color: var(--grau); white-space: nowrap; }
+.vp .spaltenkopf span:first-child { padding-left: .8mm; }
+.vp .spaltenkopf span:last-child { justify-self: end; }
+
+.vp .rumpf { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.vp .rumpf > * { flex: none; }
+
+.vp .reihe { display: grid; grid-template-columns: 9mm minmax(0, 1fr); column-gap: 2.6mm; margin-top: var(--abstand); }
+.vp .reihe-kopf { height: var(--streifen); border-radius: 1.6mm; background: var(--dunkel); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+.vp .reihe-kopf small { font-size: 4.7pt; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
+.vp .reihe-kopf b { margin-top: .6mm; font-size: 14pt; color: var(--akzent); }
+
+/* Hutschiene mit Geraeten, massstaeblich nach Teilungseinheiten */
+.vp .streifen { position: relative; display: grid; grid-template-columns: repeat(var(--te), minmax(0, 1fr)); gap: .7mm; height: var(--streifen); }
+.vp .streifen::before { content: ""; position: absolute; left: 0; right: 0; top: 30%; height: 40%; border-radius: .6mm; background: repeating-linear-gradient(90deg, #e4e8ed 0 2.2mm, #edf0f4 2.2mm 4.4mm); }
+.vp .modul { position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.6mm .4mm 1.3mm; border: .3mm solid #9aa5b2; border-radius: 1mm; background: #fff; line-height: 1; text-align: center; }
+.vp .modul::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.3mm; background: var(--gruppe, #cfd5dd); }
+.vp .m-nr { position: absolute; top: .5mm; left: .8mm; font-size: 5.4pt; color: var(--grau); }
+.vp .m-wert { font-size: calc(var(--fs) + .6pt); font-weight: 700; color: var(--dunkel); white-space: nowrap; }
+.vp .m-sub { margin-top: .4mm; font-size: 5.2pt; color: var(--grau); white-space: nowrap; }
+.vp .modul.typ-rcd { border-color: var(--gruppe); background: var(--gruppe); }
+.vp .modul.typ-rcd::after { display: none; }
+.vp .modul.typ-rcd .m-nr, .vp .modul.typ-rcd .m-sub { color: rgba(255, 255, 255, .85); }
+.vp .modul.typ-rcd .m-wert { color: #fff; }
+.vp .modul.typ-leer { border: .3mm dashed #b3bcc7; background: rgba(255, 255, 255, .55); }
+.vp .modul.typ-leer::after { display: none; }
+.vp .modul.geraet { background: var(--flaeche); }
+.vp .modul.reserve .m-wert { color: #98a2ae; }
+
+.vp .liste { display: grid; grid-template-columns: 1fr 1fr; column-gap: 5mm; align-items: start; margin-top: 1.2mm; }
+.vp .eintrag { display: grid; grid-template-columns: var(--spalten); column-gap: 1.2mm; align-items: center; min-height: var(--zeile); padding: .3mm 0; border-bottom: .2mm solid var(--linie); font-size: var(--fs); }
+.vp .e-nr { padding-left: .8mm; font-weight: 700; color: var(--dunkel); white-space: nowrap; }
+.vp .e-bmk { font-size: .74em; color: var(--grau); white-space: nowrap; }
+.vp .e-schutz b { font-weight: 700; white-space: nowrap; }
+.vp .e-schutz small { margin-left: .25em; font-size: .72em; color: var(--grau); }
+.vp .e-text { min-width: 0; line-height: 1.15; overflow-wrap: anywhere; font-family: "Barlow Semi Condensed", Barlow, Bahnschrift, sans-serif; font-weight: 500; }
+.vp .e-detail { display: block; margin-top: .2mm; font-size: .8em; font-weight: 400; color: var(--grau); }
+.vp .e-rcd { justify-self: end; }
+.vp .punkt { display: grid; place-items: center; width: 1.32em; height: 1.32em; border-radius: 50%; background: var(--gruppe); color: #fff; font-size: .8em; font-weight: 700; line-height: 1; }
+.vp .punkt.ohne { background: none; border: .25mm solid #b3bcc7; color: #98a2ae; font-weight: 400; }
+.vp .eintrag.ist-rcd { background: color-mix(in srgb, var(--gruppe) 11%, #fff); border-bottom-color: color-mix(in srgb, var(--gruppe) 45%, #fff); }
+.vp .eintrag.reserve .e-text { color: #98a2ae; font-style: italic; }
+.vp .punkt.fraglich { background: none; border: .25mm dashed #b45309; color: #b45309; }
+.vp .eintrag.unsicher { background: #fff4d6; }
+.vp .modul.unsicher { border: .4mm dashed #d97706; }
+
+/* ---------- Legende ---------- */
+.vp .legende { display: grid; grid-template-columns: 1fr 1.2fr; column-gap: 6mm; margin-top: calc(var(--abstand) + 1.2mm); font-size: 7.2pt; }
+.vp .legende h3 { margin: 0 0 1mm; padding-bottom: .7mm; border-bottom: .3mm solid var(--dunkel); font-size: 5.9pt; font-weight: 400; letter-spacing: .09em; text-transform: uppercase; color: var(--grau); }
+.vp .l-rcd { display: flex; align-items: baseline; gap: 1.6mm; margin: .8mm 0; line-height: 1.25; }
+.vp .l-rcd .punkt { flex: none; font-size: 6.4pt; transform: translateY(-.1mm); }
+.vp .l-rcd small { font-size: 1em; color: var(--grau); }
+.vp .l-kurz { line-height: 1.5; color: var(--grau); }
+.vp .l-kurz b { color: var(--dunkel); }
+.vp .l-kurz span { white-space: nowrap; }
+
+/* ---------- Nachtraege (fuellt freien Platz) ---------- */
+.vp .nachtrag { flex: 1 1 0; min-height: 0; max-height: 72mm; margin-top: auto; display: flex; flex-direction: column; overflow: hidden; }
+.vp .nachtrag-kopf { flex: none; margin-top: 4.5mm; display: grid; grid-template-columns: 26mm 1fr 34mm; padding-bottom: .7mm; border-bottom: .3mm solid var(--dunkel); font-size: 5.9pt; letter-spacing: .09em; text-transform: uppercase; color: var(--grau); }
+.vp .nachtrag-kopf span + span { padding-left: 1.6mm; }
+.vp .nachtrag-linien { flex: 1 1 0; min-height: 0; }
+.vp .n-zeile { display: grid; grid-template-columns: 26mm 1fr 34mm; height: 7.5mm; border-bottom: .2mm solid var(--linie); }
+.vp .n-zeile span + span { border-left: .2mm solid var(--linie); }
+
+/* ---------- Abschluss ---------- */
+.vp .schluss { display: flex; justify-content: space-between; align-items: flex-end; gap: 6mm; margin-top: 3.6mm; font-size: 7pt; }
+.vp .schluss.unten { margin-top: auto; padding-top: 3.6mm; }
+.vp .hinweis { max-width: 124mm; line-height: 1.4; color: var(--grau); }
+.vp .hinweis p { margin: 0; }
+.vp .hinweis p + p { margin-top: .8mm; font-size: 6.2pt; }
+.vp .unterschrift { flex: none; width: 56mm; }
+.vp .unterschrift div { color: var(--dunkel); }
+.vp .unterschrift i { display: block; height: 8mm; border-bottom: .3mm solid var(--text); }
+.vp.d-kompakt .unterschrift i, .vp.d-eng .unterschrift i { height: 6mm; }
+.vp .unterschrift small { display: block; margin-top: .6mm; font-size: 5.9pt; letter-spacing: .09em; text-transform: uppercase; color: var(--grau); }
+
+.vp .fusszeile { flex: none; display: flex; justify-content: space-between; gap: 6mm; margin-top: 2.8mm; padding-top: 1.6mm; border-top: .3mm solid var(--dunkel); font-size: 6.7pt; color: var(--grau); }
+.vp .fusszeile b { color: var(--dunkel); }
+.vp .fusszeile span:last-child { flex: none; }
+
+/* ---------- Aufnahmebogen (leer, zum Ausfuellen vor Ort) ---------- */
+.vp.bogen { --fs: 9pt; --streifen: 13mm; --abstand: 4mm; }
+.vp.bogen .meta { grid-template-columns: repeat(4, minmax(0, 1fr)); background: none; border: .3mm solid var(--linie); padding: 0; row-gap: 0; }
+.vp.bogen .meta > div { height: 10.5mm; padding: 1.1mm 2.6mm .5mm; border-left: .3mm solid var(--linie); display: flex; flex-direction: column; }
+.vp .m-felder { flex: 1 1 0; min-height: 0; display: flex; gap: 1.6mm; }
+.vp .m-felder a.feld:first-child { flex: 0 0 12mm; }
+.vp.bogen .meta > div:nth-child(4n + 1) { border-left: 0; }
+.vp.bogen .meta > div:nth-child(n + 5) { border-top: .3mm solid var(--linie); }
+.vp.bogen .m-w { margin-top: 1.4mm; font-size: 8pt; font-weight: 400; color: var(--text); white-space: nowrap; }
+/* Platzhalter fuer Formularfelder: Chrome schreibt sie als Link-Rechteck ins PDF, erstellen.ps1 macht daraus Felder */
+.vp a.feld { display: block; flex: 1 1 0; min-height: 0; }
+.vp .kaestchen a.feld, .vp.bogen .modul a.feld, .vp .notizen a.feld { position: absolute; inset: 0; }
+.vp.bogen .modul a.feld { top: 3.4mm; left: .5mm; right: .5mm; bottom: 1mm; }
+.vp.bogen .eintrag a.feld { align-self: end; height: 5.6mm; }
+.vp .kaestchen { position: relative; display: inline-block; width: 2.8mm; height: 2.8mm; margin: 0 .9mm 0 0; border: .3mm solid var(--text); vertical-align: -.4mm; }
+.vp .kaestchen + .kaestchen, .vp .m-w .abstand { margin-left: 2.2mm; }
+.vp .bogen-tipp { flex: none; margin-top: 3mm; font-size: 7.4pt; line-height: 1.4; color: var(--grau); }
+.vp .bogen-tipp b { color: var(--dunkel); }
+.vp.bogen .modul { background: #fff; }
+.vp.bogen .modul::after { display: none; }
+.vp.bogen .liste { margin-top: 0; }
+.vp.bogen .eintrag { grid-template-columns: 8mm 1fr; align-items: end; min-height: 8.2mm; padding-bottom: .9mm; border-bottom-color: #aeb7c2; }
+.vp .notizen { flex: 1 1 0; min-height: 0; margin-top: 7mm; display: flex; flex-direction: column; }
+.vp .notizen h3 { flex: none; margin: 0; padding-bottom: .7mm; border-bottom: .3mm solid var(--dunkel); font-size: 5.9pt; font-weight: 400; letter-spacing: .09em; text-transform: uppercase; color: var(--grau); }
+.vp .notizen > div { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; }
+.vp .notizen i { display: block; height: 8.6mm; border-bottom: .2mm solid #aeb7c2; }

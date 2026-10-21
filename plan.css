@@ -200,3 +200,6 @@
 .vp .notizen h3 { flex: none; margin: 0; padding-bottom: .7mm; border-bottom: .3mm solid var(--dunkel); font-size: 5.9pt; font-weight: 400; letter-spacing: .09em; text-transform: uppercase; color: var(--grau); }
 .vp .notizen > div { position: relative; flex: 1 1 0; min-height: 0; overflow: hidden; }
 .vp .notizen i { display: block; height: 8.6mm; border-bottom: .2mm solid #aeb7c2; }
+.vp .fusszeile.mit-link { align-items: center; padding-top: 1.4mm; }
+.vp .app-link { display: inline-block; padding: 1mm 3.2mm; border-radius: 99px; background: var(--dunkel); color: #fff; font-size: 7.8pt; font-weight: 700; text-decoration: none; }
+.vp .app-url { margin-left: 2.2mm; color: var(--grau); }

@@ -208,6 +208,16 @@
         h('span', null, h('b', null, FIRMA.name), teile.length ? ' · ' + teile.join(' · ') : ''),
         h('span', { class: 'seite' }));
     }
+    // Fusszeile des Aufnahmebogens: Link zur Web-App, damit man aus dem ausgefuellten Bogen
+    // (z. B. in Craftnote) direkt zum fertigen Plan kommt
+    function fusszeileBogen() {
+      if (!FIRMA.app_url) return fusszeile();
+      return h('footer', { class: 'fusszeile mit-link' },
+        h('span', null,
+          h('a', { class: 'app-link', href: FIRMA.app_url }, 'Fertigen Verteilerplan erstellen ›'),
+          h('span', { class: 'app-url' }, FIRMA.app_url.replace(/^https?:\/\//, '').replace(/\/$/, ''))),
+        h('span', null, h('b', null, FIRMA.name), ' · ', h('span', { class: 'seite' })));
+    }
     function seitenzahlen() {
       const s = ziel.querySelectorAll('.seite');
       s.forEach((el, i) => { el.textContent = `Seite ${i + 1} / ${s.length}`; });
@@ -451,11 +461,11 @@
       const nummern = Array.from({ length: gesamt }, (_, i) => i + 1);
 
       const rumpf1 = h('main', { class: 'rumpf' }, nummern.slice(0, erste).map(bogenReihe));
-      ziel.append(h('section', { class: 'blatt' }, kopfGross('Aufnahmebogen', 'Verteilerplan · Aufnahme vor Ort'), felder, tipp, rumpf1, fusszeile()));
+      ziel.append(h('section', { class: 'blatt' }, kopfGross('Aufnahmebogen', 'Verteilerplan · Aufnahme vor Ort'), felder, tipp, rumpf1, fusszeileBogen()));
       if (gesamt > erste) {
         const rumpf2 = h('main', { class: 'rumpf' }, nummern.slice(erste).map(bogenReihe),
           h('section', { class: 'notizen' }, h('h3', null, 'Notizen'), h('div')));
-        ziel.append(h('section', { class: 'blatt' }, kopfKlein(`Aufnahmebogen · Reihe ${erste + 1}–${gesamt}`), rumpf2, fusszeile()));
+        ziel.append(h('section', { class: 'blatt' }, kopfKlein(`Aufnahmebogen · Reihe ${erste + 1}–${gesamt}`), rumpf2, fusszeileBogen()));
         const feld = rumpf2.querySelector('.notizen > div');
         const zeilen = Math.floor(feld.clientHeight / (8.6 * MM) + .02);
         for (let i = 0; i < zeilen; i++) feld.append(h('i'));

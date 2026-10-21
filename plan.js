@@ -461,18 +461,18 @@
       const nummern = Array.from({ length: gesamt }, (_, i) => i + 1);
 
       const rumpf1 = h('main', { class: 'rumpf' }, nummern.slice(0, erste).map(bogenReihe));
-      ziel.append(h('section', { class: 'blatt' }, kopfGross('Aufnahmebogen', 'Verteilerplan · Aufnahme vor Ort'), felder, tipp, rumpf1, fusszeileBogen()));
+      ziel.append(h('section', { class: 'blatt' }, kopfGross('Aufnahmebogen', 'Elektroverteiler'), felder, tipp, rumpf1, fusszeileBogen()));
       if (gesamt > erste) {
         const rumpf2 = h('main', { class: 'rumpf' }, nummern.slice(erste).map(bogenReihe),
           h('section', { class: 'notizen' }, h('h3', null, 'Notizen'), h('div')));
-        ziel.append(h('section', { class: 'blatt' }, kopfKlein(`Aufnahmebogen · Reihe ${erste + 1}–${gesamt}`), rumpf2, fusszeileBogen()));
+        ziel.append(h('section', { class: 'blatt' }, kopfKlein(`Elektroverteiler Aufnahmebogen · Reihe ${erste + 1}–${gesamt}`), rumpf2, fusszeileBogen()));
         const feld = rumpf2.querySelector('.notizen > div');
         const zeilen = Math.floor(feld.clientHeight / (8.6 * MM) + .02);
         for (let i = 0; i < zeilen; i++) feld.append(h('i'));
         feld.append(eingabe('mehrzeilig', 'notizen'));
       }
       seitenzahlen();
-      return { titel: 'Aufnahmebogen Verteilerplan', warnungen: [], offen: [] };
+      return { titel: 'Elektroverteiler Aufnahmebogen', warnungen: [], offen: [] };
     }
 
     return PLAN.aufnahmebogen ? aufnahmebogen() : plan();

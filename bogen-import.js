@@ -1,4 +1,4 @@
-/* Wandelt die Felder eines ausgefuellten Aufnahmebogens (Aufnahmebogen.pdf) in Plan-Daten um.
+/* Wandelt die Felder eines ausgefuellten Aufnahmebogens (Elektroverteiler Aufnahmebogen.pdf) in Plan-Daten um.
    Nutzbar in der Web-App (window.BogenImport) und in Node (require).
 
    BogenImport.zuPlan(felder) -> plan

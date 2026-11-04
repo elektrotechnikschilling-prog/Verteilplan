@@ -356,8 +356,10 @@
       return h('div', { class: 'warnung' }, h('b', null, 'Bitte Daten prüfen – dieser Plan ist so nicht stimmig:'), warnungen.join(' · '));
     }
 
-    // Solange offene Punkte im Plan stehen, ist er als Entwurf gekennzeichnet
-    const OFFEN = (PLAN.offen || []).filter(Boolean);
+    // Solange offene Punkte im Plan stehen, ist er als Entwurf gekennzeichnet. Dazu zaehlt jedes
+    // unsichere Geraet mit Begruendung (grund), z. B. aus Bogen-Import oder Fotoauswertung.
+    const OFFEN = [...(PLAN.offen || []).filter(Boolean),
+      ...alle.filter(g => g.unsicher && g.grund).map(g => `Nr. ${g.nr}: ${g.grund}`)];
     function entwurfbox() {
       if (!OFFEN.length) return null;
       return h('div', { class: 'entwurf' }, h('b', null, 'Entwurf – vor Ausgabe an den Kunden klären'),

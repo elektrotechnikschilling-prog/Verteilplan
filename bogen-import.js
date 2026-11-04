@@ -44,21 +44,56 @@
     return { wert, art: typ ? 'Typ ' + typ[1].toUpperCase() : '' };
   }
 
-  // Inhalt eines Kaestchens -> Geraet
-  function geraetAus(roh, std, p, offen) {
+  const unsicher = (g, grund) => Object.assign(g, { unsicher: true, grund });
+
+  // Polzahl im Kaestchen: "B16-3p", "B16 3-polig", "3xB16", "3~ B16" -> { n, rest }
+  function polmarke(roh) {
+    let m = /(?:^|[\s\-–\/,(])([1-4])\s*-?\s*(?:p|pol|polig)\b\.?\)?/i.exec(roh);
+    if (m) return { n: Number(m[1]), rest: (roh.slice(0, m.index) + ' ' + roh.slice(m.index + m[0].length)).replace(/[\s\-–,]+$/, '').trim() };
+    m = /^([1-4])\s*[x×]\s*/i.exec(roh) || /^([34])\s*~\s*/.exec(roh);
+    if (m) return { n: Number(m[1]), rest: roh.slice(m[0].length).trim() };
+    return null;
+  }
+
+  // Woran ein RCD im Text zu erkennen ist: "RCD", "FI", "Fehlerstrom", "40/30 mA", Hager "CDS440D" …
+  const RCD_TEXT = /\b(rcd|rccb|fi|fehlerstrom\w*)\b|\bCD[A-Z]?\d{3}[A-Z]?\b|\d{2,3}\s*A?\s*\/\s*(30|300|0[.,]03|0[.,]3)\s*m?A?\b/i;
+
+  // Inhalt eines Kaestchens -> Geraet. linie = Text auf der Linie daneben (fuer RCD-Erkennung).
+  // Was unklar ist, steht als grund am Geraet (unsicher) und landet so in den offenen Punkten.
+  function geraetAus(roh, std, linie) {
     roh = roh.replace(/\s+/g, ' ').trim();
     if (!roh) {
       if (std.ls) return { typ: 'LS', wert: std.ls };
-      offen.push(`Nr. ${p}: Schutzorgan fehlt (oben „LS ohne Angabe sind“ ist leer)`);
-      return { typ: 'LS', unsicher: true };
+      return unsicher({ typ: 'LS' }, 'Schutzorgan fehlt (oben „LS ohne Angabe sind“ ist leer)');
     }
-    if (/fi\s*\/\s*ls|rcbo/i.test(roh)) return { typ: 'FILS', wert: kennung(roh) || std.ls };
-    if (/^(rcd|fi\b|fehlerstrom)/i.test(roh)) {
-      const d = rcdDaten(roh.replace(/^(rcd|fi|fehlerstrom\S*)\s*/i, ''));
-      const g = { typ: 'RCD', wert: d.wert || std.rcd.wert, art: d.art || std.rcd.art };
-      if (!g.wert) offen.push(`Nr. ${p}: RCD-Daten fehlen (oben „RCD ohne Angabe sind“ ist leer)`);
+    // nurMitMa: Text von der Linie (z. B. "CDS440D") nur als RCD-Daten nehmen, wenn ein mA-Wert drinsteht
+    const rcd = (daten, extra, nurMitMa) => {
+      const d = rcdDaten(daten);
+      if (nurMitMa && !/mA/.test(d.wert)) d.wert = '';
+      const g = Object.assign({ typ: 'RCD', wert: d.wert || std.rcd.wert, art: d.art || std.rcd.art }, extra);
+      if (!g.wert) unsicher(g, 'RCD-Daten fehlen (oben „RCD ohne Angabe sind“ ist leer)');
+      return g;
+    };
+    // Betriebsmittelkennzeichen statt Geraet, z. B. "Q1" in allen vier Kaestchen eines RCD
+    const bmk = /^-?\s*([QF])\s*(\d{1,2})$/i.exec(roh);
+    if (bmk) {
+      const extra = { bmk: '-' + bmk[1].toUpperCase() + bmk[2], mehrfach: 4 };
+      if (/haupt|^hs\b/i.test(linie)) return Object.assign({ typ: 'HS' }, extra);
+      const g = rcd(RCD_TEXT.test(linie) ? linie : '', extra, true);
+      if (!RCD_TEXT.test(linie)) unsicher(g, `„${roh}“ als RCD gelesen – bitte prüfen`);
       return g;
     }
+    const pol = polmarke(roh);
+    if (pol) {
+      const g = geraetAus(pol.rest, std, linie);
+      if (g.typ === 'RCD') g.pole = pol.n >= 3 ? 4 : 2;
+      else g.pole = pol.n;
+      g.mehrfach = g.typ === 'RCD' ? 4 : pol.n;
+      return g;
+    }
+    if (/fi\s*\/\s*ls|rcbo/i.test(roh)) return { typ: 'FILS', wert: kennung(roh) || std.ls };
+    if (/^(rcd|rccb|fi\b|fehlerstrom)/i.test(roh)) return rcd(roh.replace(/^(rcd|rccb|fi|fehlerstrom\S*)\s*/i, ''), { mehrfach: 4 });
+    if (/^CD[A-Z]?\d{3}[A-Z]?\b/i.test(roh)) return rcd('', { mehrfach: 4, hinweis: roh });
     if (/^(afdd|brand)/i.test(roh)) return { typ: 'AFDD', wert: kennung(roh) || std.ls };
     if (/^sls/i.test(roh)) return { typ: 'SLS', wert: kennung(roh) || roh.replace(/^sls\s*/i, '') };
     if (/^[BCDKZ]\s*-?\s*\d{1,3}\s*A?$/i.test(roh)) return { typ: 'LS', wert: kennung(roh) };
@@ -72,11 +107,15 @@
     if (/kwh|z(ä|ae)hler/i.test(roh)) return { typ: 'ZAEHLER' };
     if (/steckdose|^sd$/i.test(roh)) return { typ: 'SD' };
     if (/^\d{1,3}\s*A?$/i.test(roh)) {
-      offen.push(`Nr. ${p}: „${roh}“ – Auslösecharakteristik (B/C) fehlt`);
-      return { typ: 'LS', wert: roh.replace(/\s*A$/i, '') + ' A', unsicher: true };
+      return unsicher({ typ: 'LS', wert: roh.replace(/\s*A$/i, '') + ' A' }, `„${roh}“ – Auslösecharakteristik (B/C) fehlt`);
     }
-    offen.push(`Nr. ${p}: „${roh}“ ist keinem Gerätetyp zugeordnet`);
-    return { typ: 'SONST', wert: roh, unsicher: true };
+    // Vertipper: N, V, G, H liegen auf der Tastatur um das B herum, X und F um das C
+    const tipp = /^([NVGHXF])\s*-?\s*(\d{1,3})\s*A?$/i.exec(roh);
+    if (tipp) {
+      const gemeint = (/[XF]/i.test(tipp[1]) ? 'C' : 'B') + tipp[2];
+      return unsicher({ typ: 'LS', wert: gemeint }, `„${roh}“ steht im Bogen – als ${gemeint} gelesen (Tippfehler?), bitte prüfen`);
+    }
+    return unsicher({ typ: 'SONST', wert: roh }, `„${roh}“ ist keinem Gerätetyp zugeordnet`);
   }
 
   // Aus dem Freitext "RCD-Zuordnung" lesen, woher Reihe `ziel` ihren Schutz bekommt.
@@ -130,23 +169,31 @@
         let s = t('s' + zwei(p));
         const linie = t('t' + zwei(p));
         const vor = geraete[geraete.length - 1];
-        if (/^(=|"|〃|''|dito)$/i.test(s)) {
-          if (vor && vor.typ !== 'LEER') {
-            vor.te++;
-            if (linie && !vor.text) vor.text = linie;
-            else if (linie && linie !== vor.text) vor.hinweis = [vor.hinweis, linie].filter(Boolean).join(' · ');
-            continue;
+        const anhaengen = () => {
+          vor.te++;
+          if (linie && !vor.text) vor.text = linie;
+          else if (linie && linie !== vor.text && !(vor.hinweis || '').split(' · ').includes(linie)) {
+            vor.hinweis = [vor.hinweis, linie].filter(Boolean).join(' · ');
           }
-          offen.push(`Nr. ${p}: „=“ ohne Gerät links daneben`);
+        };
+        if (/^(=|"|〃|''|dito)$/i.test(s)) {
+          if (vor && vor.typ !== 'LEER') { anhaengen(); continue; }
           s = '?';
+        }
+        // Gleicher Eintrag wie links bei einem mehrplatzigen Geraet ("Q1" × 4, "B16-3p" × 3):
+        // gehoert zum selben Geraet. Gleiche einfache LS ("B16", "B16") bleiben getrennte Geraete.
+        if (s && vor && vor.roh && s.replace(/\s+/g, '').toUpperCase() === vor.roh && vor.te < (vor.mehrfach || 1)) {
+          anhaengen(); continue;
         }
         if (!s && !linie) {
           if (vor && vor.typ === 'LEER') vor.te++; else geraete.push({ typ: 'LEER', te: 1 });
           continue;
         }
-        const g = geraetAus(s, std, p, offen);
+        const g = s === '?' ? unsicher({ typ: 'SONST', wert: '?' }, '„=“ ohne Gerät links daneben') : geraetAus(s, std, linie);
+        g.roh = s.replace(/\s+/g, '').toUpperCase();
         g.te = 1;
-        let text = linie;
+        // "Res", "Res.", "Resserve" -> "Reserve" (wird im Plan grau gesetzt)
+        let text = /^res(\.|erve|serve)?$/i.test(linie) ? 'Reserve' : linie;
         if (/ohne\s*rcd/i.test(text)) {
           g.rcd = 'ohne';
           text = text.replace(/\(?\s*ohne\s*rcd\s*\)?/i, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s,–-]+|[\s,–-]+$/g, '');
@@ -157,12 +204,19 @@
       }
       // Polzahl ergibt sich aus der Zahl der belegten Plaetze
       for (const g of geraete) {
+        const angegeben = g.pole;
         if (g.typ === 'RCD') {
           g.pole = g.te >= 3 ? 4 : 2;
-          if (g.te < 2) offen.push(`Nr. ${g.platz}: RCD belegt nur einen Platz – „=“ in den weiteren Kästchen vergessen?`);
-        } else if (['LS', 'SLS', 'SI'].includes(g.typ) && g.te > 1) g.pole = g.te;
-        else if (['FILS', 'AFDD'].includes(g.typ) && g.te >= 2) g.pole = g.te >= 4 ? '3+N' : '1+N';
-        delete g.platz;
+          if (g.te < 2) unsicher(g, 'RCD belegt nur einen Platz – „=“ in den weiteren Kästchen vergessen?');
+        } else if (['LS', 'SLS', 'SI'].includes(g.typ) && (g.te > 1 || angegeben)) {
+          g.pole = g.te;
+          if (angegeben && angegeben !== g.te) {
+            unsicher(g, `${angegeben}-polig angegeben, aber ${g.te === 1 ? 'nur 1 Platz' : g.te + ' Plätze'} ausgefüllt`);
+          }
+        } else if (['FILS', 'AFDD'].includes(g.typ) && g.te >= 2) g.pole = g.te >= 4 ? '3+N' : '1+N';
+        if (g.pole === 1) delete g.pole;
+        for (const k of ['wert', 'art']) if (g[k] === '') delete g[k];
+        delete g.platz; delete g.roh; delete g.mehrfach;
       }
       while (geraete.length && geraete[geraete.length - 1].typ === 'LEER') geraete.pop();
       if (geraete.length) letzte = r;

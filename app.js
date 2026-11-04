@@ -1,30 +1,50 @@
-/* Bedienung der Web-App: Aufnahmebogen oeffnen, Daten und Verteiler bearbeiten, Plan ansehen und
-   als PDF speichern. Gezeichnet wird mit plan.js (dasselbe wie am PC), der Bogen wird mit
-   bogen-import.js umgesetzt. Alles laeuft im Browser; der aktuelle Plan liegt nur im Geraet. */
+/* Bedienung der Web-App: Verteiler fotografieren oder Aufnahmebogen oeffnen, Plaetze per Antippen
+   bearbeiten, Plan ansehen und als PDF speichern. Gezeichnet wird mit plan.js (dasselbe wie am PC),
+   der Bogen wird mit bogen-import.js umgesetzt, Fotos mit foto-ki.js ausgewertet.
+   Der Plan liegt nur im Geraet (localStorage); nur zur Fotoauswertung gehen die Fotos an die KI. */
 (function () {
   'use strict';
   const SPEICHER = 'verteilerplan.aktuell';
+  const SCHLUESSEL = 'verteilerplan.ki-schluessel';
+  const MAX_FOTOS = 8;
   const $ = s => document.querySelector(s);
   const KOPIE = o => JSON.parse(JSON.stringify(o));
 
   const TYP_NAMEN = [
     ['LS', 'LS – Leitungsschutz'], ['RCD', 'RCD – Fehlerstrom'], ['FILS', 'FI/LS'], ['AFDD', 'AFDD – Brandschutz'],
     ['SLS', 'SLS'], ['SI', 'Sicherung'], ['SPD', 'Überspannungsschutz'], ['HS', 'Hauptschalter'],
-    ['SCHUETZ', 'Schütz'], ['STS', 'Stromstoßschalter'], ['UHR', 'Zeitschaltuhr'], ['TRAFO', 'Klingeltrafo'],
+    ['SCHUETZ', 'Schütz / Relais'], ['STS', 'Stromstoßschalter'], ['UHR', 'Zeitschaltuhr'], ['TRAFO', 'Klingeltrafo / Netzteil'],
     ['ZAEHLER', 'Zwischenzähler'], ['SD', 'Steckdose'], ['SONST', 'Sonstiges'], ['LEER', 'Freier Platz']
   ];
+  const HAUPT_TYPEN = [['LS', 'LS'], ['RCD', 'RCD'], ['FILS', 'FI/LS'], ['AFDD', 'AFDD'], ['LEER', 'Frei']];
   const WERTE = {
-    LS: ['B6', 'B10', 'B13', 'B16', 'B20', 'B25', 'B32', 'C6', 'C10', 'C13', 'C16', 'C20', 'C25', 'C32', 'C40'],
-    RCD: ['25 A / 30 mA', '40 A / 30 mA', '63 A / 30 mA', '40 A / 300 mA', '63 A / 300 mA']
+    LS: [['B6', 'B10', 'B13', 'B16', 'B20', 'B25', 'B32'], ['C6', 'C10', 'C13', 'C16', 'C20', 'C25', 'C32', 'C40']],
+    RCD: [['25 A / 30 mA', '40 A / 30 mA', '63 A / 30 mA'], ['40 A / 300 mA', '63 A / 300 mA']]
   };
-  const WERTLISTE = { LS: 'LS', FILS: 'LS', AFDD: 'LS', SLS: 'LS', RCD: 'RCD' };
+  const LS_WERT = new Set(['LS', 'FILS', 'AFDD', 'SLS']);
   const POLE = { LS: ['1', '2', '3'], RCD: ['2', '4'], FILS: ['1+N', '3+N'], AFDD: ['1+N'], SLS: ['3'], SI: ['1', '3'], HS: ['3', '4'] };
   const ARTEN = ['Typ A', 'Typ F', 'Typ B', 'Typ AC'];
   const MIT_ART = new Set(['RCD', 'FILS']);
+  // Schnellwahl fuer den Stromkreis: Ort und Raum gehen in den Text ("KG – Küche"),
+  // Verbraucher in die zweite Zeile ("Steckdosen + Licht")
+  const ORTE = ['KG', 'EG', 'OG', 'DG', 'Außen'];
+  const RAEUME = ['Küche', 'Bad', 'WC', 'Wohnzimmer', 'Esszimmer', 'Schlafzimmer', 'Kinderzimmer', 'Gästezimmer', 'Büro',
+    'Flur', 'Treppenhaus', 'Keller', 'Hauswirtschaft', 'Garage', 'Dachboden', 'Terrasse', 'Garten', 'Wohnung'];
+  const VERBRAUCHER = ['Steckdosen', 'Licht', 'Herd', 'Backofen', 'Kochfeld', 'Spülmaschine', 'Waschmaschine', 'Trockner',
+    'Kühlschrank', 'Gefriertruhe', 'Heizung', 'Therme', 'Durchlauferhitzer', 'Boiler', 'Rollladen', 'Klingel',
+    'Sprechanlage', 'Netzwerk', 'Wallbox', 'Pumpe'];
+  const TRENNER = /\s+[–-]\s+/;
 
   let FIRMA = {}, LOGO = '';
   let plan = null;
   let ansicht = 'start';
+  let auswahl = null;            // Geraet (Objekt aus plan.reihen), das im Editor offen ist
+  let fotos = [];                // vorbereitete Fotos, nur im Speicher
+  let fotoHinweis = '', mitSonstigen = false, fotoVorbereitung = false;
+  let fotoLauf = null;           // { ctrl, start, uhr } waehrend der Auswertung
+  let fotoMeldung = null;        // { art: 'fehler' | 'info', text }
+  let schluesselMeldung = null, schluesselEntwurf = '';
+  let letzteAuswertung = null;   // { kosten, dauer, anzahl, fotoHinweis }
 
   /* ---------- Hilfen ---------- */
   function h(tag, attrs, ...kinder) {
@@ -33,6 +53,7 @@
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
       else if (k === 'value') el.value = v;
+      else if (k === 'checked') el.checked = !!v;
       else el.setAttribute(k, v === true ? '' : v);
     }
     for (const k of kinder.flat(Infinity)) {
@@ -46,19 +67,40 @@
   const typVon = g => String(g.typ || 'SONST').toUpperCase();
   const teVon = g => Verteilerplan.teVon(g);
   const breite = () => Number(plan.te_pro_reihe) || 12;
+  const kostenText = k => '≈ ' + (k < 0.01 ? '0,01' : k.toFixed(2).replace('.', ',')) + ' $';
 
   function speichern() { try { localStorage.setItem(SPEICHER, JSON.stringify(plan)); } catch (e) { /* privater Modus */ } }
   let speicherUhr = 0;
   function speichernSpaeter() { clearTimeout(speicherUhr); speicherUhr = setTimeout(speichern, 300); }
   function gesichert() { try { return JSON.parse(localStorage.getItem(SPEICHER) || 'null'); } catch (e) { return null; } }
   const hatInhalt = p => p && (p.kunde || p.adresse || (p.reihen || []).some(r => (r.geraete || []).length));
+  function schluessel() { try { return localStorage.getItem(SCHLUESSEL) || ''; } catch (e) { return ''; } }
 
   function leererPlan() {
     return { kunde: '', adresse: '', verteiler: '', standort: '', netz: '', vorsicherung: '', datum: heute(),
       bearbeiter: '', bemerkung: '', te_pro_reihe: 12, reihen: [{ geraete: [] }], offen: [] };
   }
   function setze(obj, feld, wert) { if (wert === '' || wert == null) delete obj[feld]; else obj[feld] = wert; }
-  function geraetVon(id) { const [r, g] = id.split('.').map(Number); return plan.reihen[r].geraete[g]; }
+
+  // Alle Geraete mit Reihe, Index und Platznummer
+  function alleGeraete() {
+    const aus = [];
+    plan.reihen.forEach((r, ri) => {
+      let p = ri * breite() + 1;
+      r.geraete.forEach((g, gi) => {
+        const te = teVon(g);
+        aus.push({ g, ri, gi, von: p, nr: te > 1 ? `${p}–${p + te - 1}` : String(p) });
+        p += te;
+      });
+    });
+    return aus;
+  }
+  const stelleVon = g => alleGeraete().find(x => x.g === g) || null;
+  const echte = () => alleGeraete().filter(x => typVon(x.g) !== 'LEER');
+  function letzterLsWert() {
+    const g = [...alleGeraete()].reverse().find(x => typVon(x.g) === 'LS' && x.g.wert);
+    return g ? g.g.wert : 'B16';
+  }
 
   function herunterladen(name, inhalt, typ) {
     const url = URL.createObjectURL(new Blob([inhalt], { type: typ }));
@@ -75,13 +117,15 @@
   /* ---------- Ansichten ---------- */
   function zeige(neu) {
     if (neu !== 'start' && !plan) neu = 'start';
+    if (neu !== 'verteiler') { auswahl = null; zeichneEditor(); }
     ansicht = neu;
-    for (const id of ['start', 'daten', 'verteiler', 'plan']) $('#ansicht-' + id).hidden = id !== neu;
+    for (const id of ['start', 'fotos', 'daten', 'verteiler', 'plan']) $('#ansicht-' + id).hidden = id !== neu;
     document.querySelectorAll('.schritte button').forEach(b => {
       b.classList.toggle('aktiv', b.dataset.ansicht === neu);
       b.disabled = !plan;
     });
     if (neu === 'start') zeichneStart();
+    if (neu === 'fotos') zeichneFotos();
     if (neu === 'daten') zeichneDaten();
     if (neu === 'verteiler') zeichneVerteiler();
     if (neu === 'plan') zeichnePlan();
@@ -104,6 +148,7 @@
 
   function neuBeginnen() {
     if (hatInhalt(plan) && !confirm('Der aktuelle Plan wird ersetzt. Weiter?')) return false;
+    fotos = []; letzteAuswertung = null; fotoMeldung = null; fotoHinweis = '';
     return true;
   }
 
@@ -121,6 +166,8 @@
     return werte;
   }
 
+  const offenesDa = p => (p.offen || []).length || p.reihen.some(r => r.geraete.some(g => g.unsicher));
+
   async function bogenOeffnen(datei) {
     fehler('');
     try {
@@ -130,9 +177,10 @@
       if (!bekannt.length) throw new Error('In dieser PDF stecken keine Felder des Aufnahmebogens. Bitte den Aufnahmebogen aus Craftnote nehmen, ausfüllen und als PDF speichern.');
       const neu = BogenImport.zuPlan(werte);
       if (!neu.datum) neu.datum = heute();
+      if (!neu.reihen.length) neu.reihen.push({ geraete: [] });
       plan = neu;
       speichern();
-      zeige('plan');
+      zeige(offenesDa(plan) ? 'verteiler' : 'plan');
     } catch (e) {
       fehler(e && e.message ? e.message : String(e));
       zeige('start');
@@ -151,6 +199,150 @@
       fehler('Die Datei konnte nicht gelesen werden: ' + (e.message || e));
       zeige('start');
     }
+  }
+
+  /* ---------- Fotos ---------- */
+  function zeichneFotos() {
+    const el = $('#ansicht-fotos');
+    el.textContent = '';
+    const schl = schluessel();
+    const sperre = !!fotoLauf || fotoVorbereitung;
+    el.append(h('div', { class: 'karte' },
+      h('h2', null, 'Fotos vom Verteiler'),
+      h('ol', { class: 'foto-tipps' },
+        h('li', null, h('b', null, 'Ganzer Verteiler'), ' – Abdeckung ab, alle Reihen im Bild'),
+        h('li', null, h('b', null, 'Jede Reihe nah'), ' – gerade von vorn, Aufdrucke wie B16 lesbar'),
+        h('li', null, h('b', null, 'Beschriftung'), ' – Streifen oder Liste in der Tür, falls vorhanden')),
+      h('div', { class: 'foto-knoepfe' },
+        h('button', { type: 'button', class: 'knopf haupt', 'data-aktion': 'foto-kamera', disabled: sperre || fotos.length >= MAX_FOTOS }, 'Foto aufnehmen'),
+        h('button', { type: 'button', class: 'knopf', 'data-aktion': 'foto-galerie', disabled: sperre || fotos.length >= MAX_FOTOS }, 'Bilder auswählen')),
+      fotos.length
+        ? h('div', { class: 'foto-raster' }, fotos.map((f, i) => h('figure', { class: 'foto' },
+            h('img', { src: f.url, alt: `Foto ${i + 1}`, 'data-foto-gross': i }),
+            h('figcaption', null, `Foto ${i + 1}`),
+            !sperre && h('button', { type: 'button', class: 'knopf-icon loeschen', 'data-foto-weg': i, 'aria-label': `Foto ${i + 1} entfernen` }, '✕'))))
+        : h('p', { class: 'leise' }, fotoVorbereitung ? 'Fotos werden vorbereitet …' : `Noch keine Fotos (bis zu ${MAX_FOTOS}).`),
+      fotos.length && fotoVorbereitung ? h('p', { class: 'leise' }, 'Fotos werden vorbereitet …') : null));
+
+    el.append(h('div', { class: 'karte' },
+      h('h2', null, 'Hinweise für die Auswertung ', h('small', null, '(optional)')),
+      h('textarea', { class: 'eingabe', id: 'foto-hinweis', rows: 2, value: fotoHinweis,
+        placeholder: 'z. B. „Obere Reihe ist alt und hat keinen RCD“ – gern auch diktieren' }),
+      h('label', { class: 'haken' }, h('input', { type: 'checkbox', id: 'foto-sonstige', checked: mitSonstigen }),
+        'Auch Reihen ohne Schutzgeräte übernehmen (Zähler, Uhren, Netzteile)')));
+
+    el.append(zugangKarte(schl));
+    el.append(h('div', { class: 'weiter foto-weiter' },
+      h('div', { id: 'foto-status', class: 'foto-status', role: 'status' }),
+      fotoLauf
+        ? h('button', { type: 'button', class: 'knopf', 'data-aktion': 'foto-abbrechen' }, 'Abbrechen')
+        : h('button', { type: 'button', class: 'knopf haupt', 'data-aktion': 'foto-auswerten', disabled: !fotos.length || !schl || fotoVorbereitung }, 'Auswerten →')));
+    statusZeigen();
+  }
+
+  function zugangKarte(schl) {
+    if (schl) {
+      return h('div', { class: 'karte zugang' },
+        h('h2', null, 'KI-Zugang'),
+        h('p', null, `Eingerichtet – der Schlüssel endet auf „…${schl.slice(-4)}“ und ist nur auf diesem Gerät gespeichert.`),
+        h('button', { type: 'button', class: 'knopf klein', 'data-aktion': 'schluessel-weg', disabled: !!fotoLauf }, 'Schlüssel entfernen'));
+    }
+    return h('div', { class: 'karte zugang' },
+      h('h2', null, 'KI-Zugang einrichten'),
+      h('p', null, 'Die Fotos werden zur Auswertung an Claude (Anthropic) geschickt – nur die Fotos und die Hinweise oben, ohne Kundenname und Adresse. ',
+        'Dafür braucht dieses Gerät einmalig einen API-Schlüssel aus dem Firmenkonto (platform.claude.com → API Keys). Er wird nur hier gespeichert.'),
+      h('div', { class: 'zeile-knoepfe' },
+        h('input', { class: 'eingabe', id: 'schluessel-neu', type: 'password', autocomplete: 'off', spellcheck: 'false',
+          placeholder: 'sk-ant-…', 'aria-label': 'API-Schlüssel', value: schluesselEntwurf }),
+        h('button', { type: 'button', class: 'knopf', 'data-aktion': 'schluessel-speichern' }, 'Speichern')),
+      schluesselMeldung && h('p', { class: 'meldung ' + schluesselMeldung.art }, schluesselMeldung.text));
+  }
+
+  function statusZeigen() {
+    const el = $('#foto-status');
+    if (!el) return;
+    el.className = 'foto-status';
+    el.textContent = '';
+    if (fotoLauf) {
+      const s = Math.round((Date.now() - fotoLauf.start) / 1000);
+      el.classList.add('laeuft');
+      el.append(h('span', { class: 'kreisel', 'aria-hidden': 'true' }),
+        `Fotos werden ausgewertet … ${Math.floor(s / 60)}:${zwei(s % 60)} (meist 1–3 Minuten)`);
+    } else if (fotoMeldung) {
+      el.classList.add(fotoMeldung.art);
+      el.textContent = fotoMeldung.text;
+    } else if (!schluessel()) el.textContent = 'Zuerst den KI-Zugang einrichten.';
+    else if (!fotos.length) el.textContent = 'Zuerst Fotos aufnehmen.';
+    else el.textContent = `${fotos.length} Foto${fotos.length > 1 ? 's' : ''} bereit.`;
+  }
+
+  async function fotosHinzu(dateien) {
+    fotoMeldung = null;
+    fotoVorbereitung = true;
+    zeichneFotos();
+    for (const d of dateien) {
+      if (fotos.length >= MAX_FOTOS) { fotoMeldung = { art: 'fehler', text: `Höchstens ${MAX_FOTOS} Fotos je Auswertung.` }; break; }
+      try { fotos.push(await FotoKI.bildVorbereiten(d)); }
+      catch (e) { fotoMeldung = { art: 'fehler', text: e.message || String(e) }; }
+    }
+    fotoVorbereitung = false;
+    if (ansicht === 'fotos') zeichneFotos();
+  }
+
+  async function schluesselSpeichern() {
+    const k = ($('#schluessel-neu').value || '').trim();
+    schluesselEntwurf = k;
+    if (!/^sk-ant-\S{10,}$/.test(k)) {
+      schluesselMeldung = { art: 'fehler', text: 'Das sieht nicht wie ein API-Schlüssel aus (er beginnt mit „sk-ant-“).' };
+      zeichneFotos(); return;
+    }
+    schluesselMeldung = { art: 'info', text: 'Schlüssel wird geprüft …' };
+    zeichneFotos();
+    try {
+      await FotoKI.pruefen(k);
+      try { localStorage.setItem(SCHLUESSEL, k); } catch (e) { throw new Error('Der Schlüssel konnte auf diesem Gerät nicht gespeichert werden (privater Modus?).'); }
+      schluesselMeldung = null; schluesselEntwurf = '';
+    } catch (e) {
+      schluesselMeldung = { art: 'fehler', text: e.message || String(e) };
+    }
+    if (ansicht === 'fotos') zeichneFotos();
+  }
+
+  async function fotosAuswerten() {
+    const schl = schluessel();
+    if (!fotos.length || !schl || fotoLauf) return;
+    fotoMeldung = null;
+    fotoLauf = { ctrl: new AbortController(), start: Date.now() };
+    fotoLauf.uhr = setInterval(statusZeigen, 1000);
+    zeichneFotos();
+    try {
+      const erg = await FotoKI.auswerten({ bilder: fotos, hinweis: fotoHinweis, schluessel: schl, signal: fotoLauf.ctrl.signal, mitSonstigen });
+      if (plan.reihen.some(r => r.geraete.length) &&
+          !confirm('Die Geräte im Plan werden durch das Ergebnis der Fotoauswertung ersetzt (Kunde, Adresse usw. bleiben). Weiter?')) {
+        fotoMeldung = { art: 'info', text: 'Ergebnis nicht übernommen.' };
+        return;
+      }
+      plan.reihen = erg.reihen.length ? erg.reihen : [{ geraete: [] }];
+      plan.offen = erg.offen;
+      speichern();
+      letzteAuswertung = { kosten: erg.kosten, dauer: erg.dauer, anzahl: fotos.length, fotoHinweis: erg.fotoHinweis };
+      clearInterval(fotoLauf.uhr);
+      fotoLauf = null;
+      zeige('verteiler');
+    } catch (e) {
+      fotoMeldung = { art: 'fehler', text: e.message || String(e) };
+    } finally {
+      if (fotoLauf) { clearInterval(fotoLauf.uhr); fotoLauf = null; }
+      if (ansicht === 'fotos') zeichneFotos();
+    }
+  }
+
+  function grossZeigen(url) {
+    const box = h('div', { class: 'grossbild', role: 'dialog', 'aria-label': 'Foto groß' },
+      h('img', { src: url, alt: 'Foto' }),
+      h('button', { type: 'button', class: 'knopf haupt', 'aria-label': 'Schließen' }, 'Schließen'));
+    box.addEventListener('click', e => { if (e.target.tagName !== 'IMG') box.remove(); });
+    document.body.append(box);
   }
 
   /* ---------- 1 Daten ---------- */
@@ -177,13 +369,23 @@
         feld('Erstellt von', 'bearbeiter'),
         feld('Bemerkung auf dem Plan (optional)', 'bemerkung', { breit: true }))));
 
+    const unsichere = echte().filter(x => x.g.unsicher);
+    if (unsichere.length) {
+      el.append(h('div', { class: 'karte offen' },
+        h('h2', null, `Unsichere Plätze (${unsichere.length})`),
+        h('ul', { class: 'offen-liste' }, unsichere.map(x => h('li', null,
+          h('span', null, `Nr. ${x.nr}: ${x.g.grund || 'als unsicher markiert'}`),
+          h('button', { type: 'button', class: 'knopf klein', 'data-zu-platz': `${x.ri}.${x.gi}` }, 'Ansehen'))))));
+    }
+
     const offen = plan.offen || [];
     el.append(h('div', { class: 'karte' + (offen.length ? ' offen' : '') },
       h('h2', null, offen.length ? `Offene Punkte (${offen.length})` : 'Offene Punkte'),
       offen.length
         ? h('ul', { class: 'offen-liste' }, offen.map((p, i) => h('li', null, h('span', null, p),
             h('button', { type: 'button', class: 'knopf klein', 'data-offen-weg': i }, 'Erledigt'))))
-        : h('p', { style: 'margin:0 0 12px;color:var(--a-grau)' }, 'Keine – der Plan ist kein Entwurf.'),
+        : h('p', { style: 'margin:0 0 12px;color:var(--a-grau)' },
+            unsichere.length ? 'Keine weiteren.' : 'Keine – der Plan ist kein Entwurf.'),
       h('div', { class: 'zeile2', style: 'display:flex;gap:8px' },
         h('input', { class: 'eingabe', id: 'offen-neu', placeholder: 'Punkt notieren, der noch zu klären ist' }),
         h('button', { type: 'button', class: 'knopf', 'data-aktion': 'offen-dazu' }, 'Dazu'))));
@@ -201,95 +403,416 @@
     const aktuell = wert == null ? '' : String(wert);
     return h('select', attrs, optionen.map(([w, t]) => h('option', { value: w, selected: w === aktuell }, t)));
   }
+  const rcdAnzahl = () => plan.reihen.reduce((n, r) => n + r.geraete.filter(g => typVon(g) === 'RCD').length, 0);
+
+  function kachelText(g) {
+    const typ = typVon(g);
+    if (typ === 'RCD') return 'RCD';
+    if (LS_WERT.has(typ)) return g.wert || (Verteilerplan.TYPEN[typ] || {}).kurz || typ;
+    return (Verteilerplan.TYPEN[typ] || {}).kurz || 'Gerät';
+  }
+  function kachelKlein(g) {
+    const typ = typVon(g);
+    if (typ === 'RCD') return (g.wert || '').replace(/\s*A\s*\/\s*/, '/').replace(/\s*mA/, '');
+    if (typ === 'FILS' || typ === 'AFDD') return (Verteilerplan.TYPEN[typ] || {}).kurz;
+    const p = String(g.pole || '');
+    return /^[23]$/.test(p) ? p + '-pol.' : '';
+  }
 
   function zeichneVerteiler() {
     const el = $('#ansicht-verteiler');
     el.textContent = '';
     if (!plan.reihen.length) plan.reihen.push({ geraete: [] });
-    const rcdAnzahl = plan.reihen.reduce((n, r) => n + r.geraete.filter(g => typVon(g) === 'RCD').length, 0);
-    plan.reihen.forEach((r, ri) => el.append(reiheKarte(r, ri, rcdAnzahl)));
-    el.append(h('div', { class: 'weiter' },
-      h('button', { type: 'button', class: 'knopf', 'data-aktion': 'reihe-neu' }, '+ Reihe'),
-      h('button', { type: 'button', class: 'knopf haupt', 'data-ziel': 'plan' }, 'Plan ansehen →')));
+    if (auswahl && !stelleVon(auswahl)) auswahl = null;
+    el.append(h('div', { id: 'verteiler-kopf' }), h('div', { id: 'reihen' }),
+      h('div', { class: 'weiter' },
+        h('button', { type: 'button', class: 'knopf', 'data-aktion': 'reihe-neu' }, '+ Reihe'),
+        h('button', { type: 'button', class: 'knopf', 'data-ziel': 'fotos' }, 'Aus Fotos erkennen'),
+        h('button', { type: 'button', class: 'knopf haupt', 'data-ziel': 'plan' }, 'Plan ansehen →')));
+    zeichneReihen();
+    zeichneEditor();
   }
 
-  function reiheKarte(r, ri, rcdAnzahl) {
+  function verteilerKopf() {
+    const bereich = $('#verteiler-kopf');
+    if (!bereich) return;
+    bereich.textContent = '';
+    const unsichere = echte().filter(x => x.g.unsicher);
+    if (letzteAuswertung) {
+      const a = letzteAuswertung;
+      bereich.append(h('div', { class: 'meldung info' },
+        h('b', null, `Vorschlag aus ${a.anzahl} Foto${a.anzahl > 1 ? 's' : ''}`), ` – ${a.dauer} s, Kosten ${kostenText(a.kosten)}. Bitte alles kurz prüfen.`,
+        a.fotoHinweis && h('div', null, 'Tipp: ', a.fotoHinweis)));
+    }
+    if (unsichere.length) {
+      bereich.append(h('div', { class: 'meldung warn' },
+        h('span', null, `${unsichere.length} ${unsichere.length > 1 ? 'Plätze sind' : 'Platz ist'} unsicher (gelb). Antippen, prüfen, „Stimmt so“.`),
+        h('button', { type: 'button', class: 'knopf klein', 'data-aktion': 'naechster-unsicher' }, 'Zum ersten')));
+    } else {
+      bereich.append(h('p', { class: 'leise tipp' }, 'Platz antippen zum Bearbeiten · freie Plätze (+) antippen, um ein Gerät einzusetzen.'));
+    }
+    if (fotos.length) {
+      bereich.append(h('div', { class: 'foto-leiste' }, fotos.map((f, i) =>
+        h('img', { src: f.url, alt: `Foto ${i + 1}`, 'data-foto-gross': i, title: 'Foto groß ansehen' }))));
+    }
+  }
+
+  function zeichneReihen() {
+    verteilerKopf();
+    const bereich = $('#reihen');
+    if (!bereich) return;
+    bereich.textContent = '';
+    const n = rcdAnzahl();
+    plan.reihen.forEach((r, ri) => bereich.append(reiheKarte(r, ri, n)));
+  }
+
+  function reiheKarte(r, ri, rcdN) {
     const start = ri * breite() + 1;
     const belegt = r.geraete.reduce((s, g) => s + teVon(g), 0);
-    let pos = start;
-    const nummern = r.geraete.map(g => { const te = teVon(g); const nr = te > 1 ? `${pos}–${pos + te - 1}` : String(pos); pos += te; return nr; });
+    const frei = Math.max(0, breite() - belegt);
+    const zellen = [], eintraege = [];
+    let p = start;
+    r.geraete.forEach((g, gi) => {
+      const typ = typVon(g), te = teVon(g);
+      const nr = te > 1 ? `${p}–${p + te - 1}` : String(p);
+      if (typ === 'LEER') {
+        for (let k = 0; k < te; k++) {
+          zellen.push(h('button', { type: 'button', class: 'zelle frei', 'data-frei': `${ri}.${gi}.${k}`, 'aria-label': `Platz ${p + k} frei – Gerät einsetzen` },
+            h('i', null, p + k), h('b', null, '+')));
+        }
+      } else {
+        const an = auswahl === g;
+        zellen.push(h('button', {
+          type: 'button', 'data-wahl': `${ri}.${gi}`, style: `--te:${te}`,
+          class: ['zelle', typ === 'RCD' ? 'rcd' : '', g.unsicher ? 'unsicher' : '', an ? 'gewaehlt' : ''].filter(Boolean).join(' '),
+          'aria-label': `Platz ${nr}: ${kachelText(g)} ${g.text || ''}`.trim()
+        }, h('i', null, nr), h('b', null, kachelText(g)), kachelKlein(g) && h('small', null, kachelKlein(g))));
+        eintraege.push(h('button', { type: 'button', 'data-wahl': `${ri}.${gi}`,
+          class: ['kurz', g.unsicher ? 'unsicher' : '', an ? 'gewaehlt' : ''].filter(Boolean).join(' ') },
+          h('span', { class: 'k-nr' }, nr),
+          h('b', { class: 'k-wert' }, [kachelText(g), kachelKlein(g)].filter(Boolean).join(' ')),
+          h('span', { class: 'k-text' }, [g.text, g.hinweis].filter(Boolean).join(' · ') ||
+            (typ === 'RCD' ? [g.wert, g.art].filter(Boolean).join(' · ') : h('em', null, 'Stromkreis fehlt'))),
+          g.unsicher && h('span', { class: 'k-warn', title: g.grund || '' }, '!')));
+      }
+      p += te;
+    });
+    for (let k = 0; k < frei; k++) {
+      zellen.push(h('button', { type: 'button', class: 'zelle frei', 'data-ende': `${ri}.${k}`, 'aria-label': `Platz ${p + k} frei – Gerät einsetzen` },
+        h('i', null, p + k), h('b', null, '+')));
+    }
 
-    const mini = h('div', { class: 'mini-streifen', 'aria-hidden': 'true' },
-      r.geraete.map((g, gi) => {
-        const typ = typVon(g);
-        const kl = typ === 'RCD' ? 'm-rcd' : typ === 'LEER' ? 'm-leer' : '';
-        const d = h('div', { class: [kl, g.unsicher ? 'm-unsicher' : ''].join(' ').trim() || null, 'data-sprung': `${ri}.${gi}`, style: `--te:${teVon(g)}` },
-          h('i', null, nummern[gi]), typ !== 'LEER' && h('b', null, g.wert || (typ === 'LS' ? 'LS' : (Verteilerplan.TYPEN[typ] || {}).kurz || typ)));
-        return d;
-      }),
-      belegt < breite() && h('div', { class: 'm-leer', style: `--te:${breite() - belegt}` }, h('i', null, 'frei')));
-
-    const zaehler = h('span', { class: 'te-zaehler' + (belegt > breite() ? ' zu-viel' : '') }, `${belegt} / ${breite()} TE belegt`);
     const kopf = h('div', { class: 'reihe-kopfzeile' },
       h('h2', null, `Reihe ${ri + 1} `, h('small', null, `Platz ${start}–${start + breite() - 1}`)),
-      zaehler,
+      h('span', { class: 'te-zaehler' + (belegt > breite() ? ' zu-viel' : '') }, `${belegt} / ${breite()} TE`),
       h('div', { class: 'rechts' },
-        rcdAuswahl({ 'data-reihe-rcd': ri, 'aria-label': 'RCD für diese Reihe' }, r.rcd, rcdAnzahl, 'RCD automatisch'),
+        rcdAuswahl({ 'data-reihe-rcd': ri, 'aria-label': 'RCD für diese Reihe' }, r.rcd, rcdN, 'RCD automatisch'),
         h('button', { type: 'button', class: 'knopf-icon loeschen', 'data-aktion': 'reihe-weg', 'data-r': ri, title: 'Reihe löschen', 'aria-label': `Reihe ${ri + 1} löschen` }, '✕')));
-
-    const liste = h('div', { class: 'geraete' }, r.geraete.map((g, gi) => geraetKarte(g, `${ri}.${gi}`, nummern[gi], rcdAnzahl)));
-    const hinzu = h('div', { class: 'hinzu' },
-      h('button', { type: 'button', class: 'knopf klein', 'data-hinzu': 'LS', 'data-r': ri }, '+ LS'),
-      h('button', { type: 'button', class: 'knopf klein', 'data-hinzu': 'RCD', 'data-r': ri }, '+ RCD'),
-      h('button', { type: 'button', class: 'knopf klein', 'data-hinzu': 'LEER', 'data-r': ri }, '+ Freier Platz'),
-      h('button', { type: 'button', class: 'knopf klein', 'data-hinzu': 'SONST', 'data-r': ri }, '+ Anderes Gerät'));
-    return h('section', { class: 'karte reihe-karte' }, kopf, mini, liste, hinzu);
+    const streifen = h('div', { class: 'streifen-edit', style: `--spalten:${Math.max(breite(), belegt)}` }, zellen);
+    const fuss = frei
+      ? h('div', { class: 'hinzu' }, h('button', { type: 'button', class: 'knopf klein', 'data-aktion': 'reihe-fuellen', 'data-r': ri },
+          `${frei} freie${frei > 1 ? '' : 'n'} Pl${frei > 1 ? 'ätze' : 'atz'} mit ${letzterLsWert()} füllen`))
+      : null;
+    return h('section', { class: 'karte reihe-karte', 'data-reihe': ri }, kopf, streifen,
+      eintraege.length ? h('div', { class: 'kurzliste' }, eintraege) : h('p', { class: 'leise leer-hinweis' }, 'Noch keine Geräte – freie Plätze antippen.'),
+      fuss);
   }
 
-  function geraetKarte(g, id, nr, rcdAnzahl) {
-    const typ = typVon(g);
-    const leer = typ === 'LEER';
-    const typWahl = h('select', { class: 'eingabe', 'data-g': id, 'data-feld': 'typ', 'aria-label': 'Gerätetyp' },
-      TYP_NAMEN.map(([w, t]) => h('option', { value: w, selected: w === typ }, t)));
-    const wert = h('input', { class: 'eingabe', 'data-g': id, 'data-feld': 'wert', value: g.wert || '', disabled: leer,
-      list: WERTLISTE[typ] ? 'werte-' + WERTLISTE[typ] : null, placeholder: typ === 'RCD' ? '40 A / 30 mA' : typ === 'LS' ? 'B16' : 'Wert', 'aria-label': 'Wert', autocomplete: 'off' });
-    const pole = POLE[typ]
-      ? h('select', { class: 'eingabe', 'data-g': id, 'data-feld': 'pole', 'aria-label': 'Polzahl' },
-          h('option', { value: '' }, 'Pole'),
-          POLE[typ].map(p => h('option', { value: p, selected: String(g.pole ?? '') === p }, p === '1+N' || p === '3+N' ? p : p + '-polig')))
-      : h('span');
-    const knoepfe = h('div', { class: 'knoepfe' },
-      h('button', { type: 'button', class: 'knopf-icon', 'data-aktion': 'hoch', 'data-g': id, title: 'nach links', 'aria-label': 'nach links schieben' }, '↑'),
-      h('button', { type: 'button', class: 'knopf-icon', 'data-aktion': 'runter', 'data-g': id, title: 'nach rechts', 'aria-label': 'nach rechts schieben' }, '↓'),
-      h('button', { type: 'button', class: 'knopf-icon loeschen', 'data-aktion': 'weg', 'data-g': id, title: 'löschen', 'aria-label': 'Gerät löschen' }, '✕'));
-    const text = h('input', { class: 'eingabe', 'data-g': id, 'data-feld': 'text', value: g.text || '', disabled: leer,
-      placeholder: leer ? 'freier Platz' : typ === 'RCD' ? 'Bezeichnung (optional)' : 'Stromkreis / Raum', 'aria-label': 'Stromkreis', autocomplete: 'off' });
+  /* ----- Aenderungen an den Geraeten (Plaetze bleiben stehen, wo es geht) ----- */
+  function neuesLs() { return { typ: 'LS', wert: letzterLsWert() }; }
 
-    const mehr = h('details', { class: 'mehr-klappe' }, h('summary', null, 'Mehr'),
-      h('div', { class: 'mehr' },
-        h('label', { class: 'feld' }, h('span', null, 'Hinweis'), h('input', { 'data-g': id, 'data-feld': 'hinweis', value: g.hinweis || '', placeholder: 'z. B. nicht abschalten' })),
-        h('label', { class: 'feld' }, h('span', null, 'Leitung'), h('input', { 'data-g': id, 'data-feld': 'leitung', value: g.leitung || '', placeholder: 'z. B. NYM-J 3×1,5 mm²' })),
-        MIT_ART.has(typ) && h('label', { class: 'feld' }, h('span', null, 'Art'),
-          h('select', { 'data-g': id, 'data-feld': 'art' }, h('option', { value: '' }, '–'), ARTEN.map(a => h('option', { value: a, selected: g.art === a }, a)))),
-        !leer && typ !== 'RCD' && h('label', { class: 'feld' }, h('span', null, 'RCD'),
-          rcdAuswahl({ 'data-g': id, 'data-feld': 'rcd' }, g.rcd, rcdAnzahl, 'wie die Reihe')),
-        h('label', { class: 'feld' }, h('span', null, 'Breite (TE)'),
-          h('input', { 'data-g': id, 'data-feld': 'te', type: 'number', min: 1, max: 12, inputmode: 'numeric', value: g.te || '', placeholder: String(teVon(g)) })),
-        h('label', { class: 'haken' }, h('input', { type: 'checkbox', 'data-g': id, 'data-feld': 'unsicher', checked: !!g.unsicher }), 'unsicher markieren')));
-
-    return h('div', { class: 'geraet' + (g.unsicher ? ' unsicher' : ''), 'data-geraet': id },
-      h('div', { class: 'nr' }, nr),
-      h('div', { class: 'zeile' }, typWahl, wert, pole, knoepfe),
-      h('div', { class: 'zeile2' }, text, mehr));
+  // Benachbarte freie Plaetze zusammenfassen, freie Plaetze am Ende weglassen
+  function aufraeumen(liste) {
+    for (let i = liste.length - 1; i >= 0; i--) {
+      const g = liste[i];
+      if (typVon(g) !== 'LEER') continue;
+      g.te = teVon(g);
+      if (g.te <= 0) { liste.splice(i, 1); continue; }
+      const n = liste[i + 1];
+      if (n && typVon(n) === 'LEER') { g.te += teVon(n); liste.splice(i + 1, 1); }
+    }
+    while (liste.length && typVon(liste[liste.length - 1]) === 'LEER') liste.pop();
   }
 
-  function neuesGeraet(art) {
-    const alle = plan.reihen.flatMap(r => r.geraete);
-    const letzter = t => [...alle].reverse().find(g => typVon(g) === t && g.wert);
-    if (art === 'LS') return { typ: 'LS', wert: (letzter('LS') || {}).wert || 'B16' };
-    if (art === 'RCD') { const v = letzter('RCD') || {}; return { typ: 'RCD', pole: 4, wert: v.wert || '40 A / 30 mA', art: v.art || 'Typ A' }; }
-    if (art === 'LEER') return { typ: 'LEER', te: 1 };
-    return { typ: 'SONST' };
+  // Wird ein Geraet breiter, nimmt es zuerst freie Plaetze und leere Platzhalter-LS rechts daneben
+  // (ohne Text) auf; wird es schmaler, bleibt rechts ein freier Platz. So verrutschen die Nummern nicht.
+  function breiteAnpassen(g, alt) {
+    const st = stelleVon(g);
+    if (!st) return;
+    const liste = plan.reihen[st.ri].geraete;
+    const neu = teVon(g);
+    if (neu < alt) liste.splice(st.gi + 1, 0, { typ: 'LEER', te: alt - neu });
+    let mehr = neu - alt, i = st.gi + 1;
+    while (mehr > 0 && i < liste.length) {
+      const n = liste[i], typ = typVon(n), te = teVon(n);
+      if (typ === 'LEER') {
+        const nimm = Math.min(mehr, te);
+        n.te = te - nimm; mehr -= nimm;
+        if (!n.te) liste.splice(i, 1); else i++;
+      } else if (typ === 'LS' && !n.text && !n.hinweis && !n.unsicher) {
+        liste.splice(i, 1); mehr -= te;
+        if (mehr < 0) { liste.splice(i, 0, { typ: 'LEER', te: -mehr }); mehr = 0; }
+      } else break;
+    }
+    aufraeumen(liste);
+  }
+
+  function setzeTyp(g, typ) {
+    const alt = typVon(g), altTe = teVon(g);
+    if (alt === typ) return;
+    g.typ = typ;
+    delete g.pole;
+    if (typ === 'LEER') {
+      g.te = altTe;
+      for (const k of ['wert', 'art', 'text', 'hinweis', 'leitung', 'rcd', 'bmk', 'unsicher', 'grund', 'typbez']) delete g[k];
+      aufraeumen(plan.reihen[stelleVon(g).ri].geraete);
+      return;
+    }
+    delete g.te;
+    if (typ === 'RCD') {
+      if (!/mA/.test(g.wert || '')) g.wert = (([...alleGeraete()].reverse().find(x => typVon(x.g) === 'RCD' && x.g !== g && x.g.wert) || {}).g || {}).wert || '40 A / 30 mA';
+      g.art = g.art || 'Typ A';
+      g.pole = 4;
+      delete g.rcd;
+    } else {
+      if (alt === 'RCD') { delete g.wert; delete g.art; }
+      if (LS_WERT.has(typ) && !g.wert) g.wert = letzterLsWert();
+      if (!LS_WERT.has(typ) && /^[BCDKZ]\d+$/.test(g.wert || '')) delete g.wert;
+      if (!MIT_ART.has(typ)) delete g.art;
+    }
+    breiteAnpassen(g, altTe);
+  }
+
+  function setzePole(g, p) {
+    const alt = teVon(g);
+    setze(g, 'pole', /^\d+$/.test(p) ? Number(p) : p);
+    if (typVon(g) === 'LS' && g.pole === 1) delete g.pole;
+    delete g.te;
+    breiteAnpassen(g, alt);
+  }
+
+  const teile = (text, trenner) => String(text || '').split(trenner).map(s => s.trim()).filter(Boolean);
+  function textUmschalten(g, wort, liste) {
+    const t = teile(g.text, TRENNER);
+    const i = t.findIndex(x => liste.includes(x));
+    if (i >= 0) { if (t[i] === wort) t.splice(i, 1); else t[i] = wort; }
+    else if (liste === ORTE) t.unshift(wort);
+    else { const o = t.findIndex(x => ORTE.includes(x)); t.splice(o >= 0 ? o + 1 : 0, 0, wort); }
+    if (t[0] === 'Reserve' && t.length > 1) t.shift();
+    setze(g, 'text', t.join(' – '));
+  }
+  function hinweisUmschalten(g, wort) {
+    const t = teile(g.hinweis, /\s*\+\s*/);
+    const i = t.indexOf(wort);
+    if (i >= 0) t.splice(i, 1); else t.push(wort);
+    setze(g, 'hinweis', t.join(' + '));
+  }
+
+  // Bisher benutzte Stromkreis-Anfaenge ("KG – Küche") zum schnellen Wiederverwenden
+  function zuletztTexte(g) {
+    const aus = [];
+    for (const x of echte()) {
+      if (x.g === g || !x.g.text || typVon(x.g) === 'RCD' || x.g.text === 'Reserve') continue;
+      const t = teile(x.g.text, TRENNER);
+      const vorn = t.length > 2 ? t.slice(0, 2).join(' – ') : t.join(' – ');
+      if (vorn && !aus.includes(vorn)) aus.push(vorn);
+    }
+    return aus.slice(-8);
+  }
+
+  /* ----- Editor fuer einen Platz (unten eingeblendet) ----- */
+  const chip = (text, an, attrs) => h('button', Object.assign({ type: 'button', class: 'chip' + (an ? ' an' : ''), 'aria-pressed': an ? 'true' : 'false' }, attrs), text);
+  const chips = (liste, kl) => h('div', { class: 'chips' + (kl ? ' ' + kl : '') }, liste);
+  const gruppe = (titel, ...inhalt) => h('div', { class: 'ed-gruppe' }, h('span', { class: 'ed-titel' }, titel), inhalt);
+
+  function zeichneEditor(fokus) {
+    const ed = $('#editor');
+    if (!auswahl || ansicht !== 'verteiler' || !stelleVon(auswahl)) {
+      auswahl = null;
+      ed.hidden = true;
+      ed.textContent = '';
+      document.body.classList.remove('mit-editor');
+      return;
+    }
+    const st = stelleVon(auswahl), g = auswahl, typ = typVon(g);
+    const liste = echte(), pos = liste.findIndex(x => x.g === g);
+    ed.hidden = false;
+    document.body.classList.add('mit-editor');
+    const scrollAlt = (ed.querySelector('.ed-inhalt') || {}).scrollTop || 0;
+    ed.textContent = '';
+
+    const kopf = h('div', { class: 'ed-kopf' },
+      h('button', { type: 'button', class: 'knopf-icon', 'data-e': 'zurueck', 'aria-label': 'vorheriger Platz', disabled: pos <= 0 }, '‹'),
+      h('div', { class: 'ed-name' }, h('b', null, `Platz ${st.nr}`), h('small', null, `Reihe ${st.ri + 1}`)),
+      h('button', { type: 'button', class: 'knopf-icon', 'data-e': 'vor', 'aria-label': 'nächster Platz', disabled: pos < 0 || pos >= liste.length - 1 }, '›'),
+      h('button', { type: 'button', class: 'knopf haupt klein', 'data-e': 'fertig' }, 'Fertig'));
+
+    const inhalt = h('div', { class: 'ed-inhalt' });
+    if (g.unsicher) {
+      inhalt.append(h('div', { class: 'ed-warn' }, h('span', null, g.grund || 'Als unsicher markiert'),
+        h('button', { type: 'button', class: 'knopf klein', 'data-e': 'ok' }, 'Stimmt so')));
+    }
+    if (g.typbez) inhalt.append(h('p', { class: 'ed-info' }, 'Auf dem Foto erkannt: ', h('b', null, g.typbez)));
+
+    // Geraet: Typ, Wert, Art, Pole
+    const geraetTeil = [];
+    const weitere = TYP_NAMEN.filter(([w]) => !HAUPT_TYPEN.some(([x]) => x === w));
+    geraetTeil.push(gruppe('Gerät',
+      chips([...HAUPT_TYPEN.map(([w, t]) => chip(t, typ === w, { 'data-e-typ': w })),
+        h('select', { class: 'chip-wahl' + (weitere.some(([w]) => w === typ) ? ' an' : ''), 'data-e-feld': 'typ', 'aria-label': 'weitere Gerätetypen' },
+          h('option', { value: '' }, 'Weitere …'),
+          weitere.map(([w, t]) => h('option', { value: w, selected: w === typ }, t)))])));
+    if (typ !== 'LEER') {
+      const andere = liste => h('input', { class: 'eingabe klein', 'data-e-feld': 'wert', value: liste.flat().includes(g.wert) ? '' : (g.wert || ''),
+        placeholder: 'anderer Wert', autocomplete: 'off', 'aria-label': 'anderer Wert' });
+      if (LS_WERT.has(typ)) {
+        geraetTeil.push(gruppe('Wert', WERTE.LS.map(z => chips(z.map(w => chip(w, g.wert === w, { 'data-e-wert': w })))), andere(WERTE.LS)));
+      } else if (typ === 'RCD') {
+        geraetTeil.push(gruppe('Wert', WERTE.RCD.map(z => chips(z.map(w => chip(w.replace(' / ', '/'), g.wert === w, { 'data-e-wert': w })))), andere(WERTE.RCD)));
+      } else {
+        geraetTeil.push(gruppe('Wert', h('input', { class: 'eingabe', 'data-e-feld': 'wert', value: g.wert || '', placeholder: 'optional', autocomplete: 'off' })));
+      }
+      if (MIT_ART.has(typ)) geraetTeil.push(gruppe('Art', chips(ARTEN.map(a => chip(a, g.art === a, { 'data-e-art': a })))));
+      if (POLE[typ]) {
+        const T = Verteilerplan.TYPEN[typ] || {};
+        const jetzt = String(g.pole ?? T.pole ?? '');
+        geraetTeil.push(gruppe('Pole', chips(POLE[typ].map(p => chip(p.includes('+') ? p : p + '-polig', jetzt === p, { 'data-e-pole': p })))));
+      }
+    }
+
+    // Stromkreis: Text und was dranhaengt. Bei Stromkreisen (LS, FI/LS …) steht das oben, weil es
+    // nach Fotoauswertung oder "Plaetze fuellen" fast immer das ist, was noch fehlt.
+    const kreisTeil = [];
+    if (typ === 'RCD') {
+      kreisTeil.push(gruppe('Bezeichnung (optional)', h('input', { class: 'eingabe', 'data-e-feld': 'text', value: g.text || '', autocomplete: 'off' })));
+    } else if (typ !== 'LEER') {
+      const zuletzt = zuletztTexte(g), t = teile(g.text, TRENNER);
+      kreisTeil.push(gruppe('Stromkreis / Raum',
+        h('input', { class: 'eingabe', 'data-e-feld': 'text', value: g.text || '', autocomplete: 'off', enterkeyhint: 'next',
+          placeholder: 'antippen oder tippen / diktieren', 'aria-label': 'Stromkreis' }),
+        zuletzt.length ? chips(zuletzt.map(z => chip(z, g.text === z, { 'data-e-text': z })), 'zuletzt') : null,
+        chips([...ORTE.map(o => chip(o, t.includes(o), { 'data-e-ort': o })), chip('Reserve', g.text === 'Reserve', { 'data-e-reserve': '1' })]),
+        chips(RAEUME.map(r => chip(r, t.includes(r), { 'data-e-raum': r })))));
+      const hw = teile(g.hinweis, /\s*\+\s*/);
+      kreisTeil.push(gruppe('Was hängt dran',
+        chips(VERBRAUCHER.map(v => chip(v, hw.includes(v), { 'data-e-verbr': v }))),
+        h('input', { class: 'eingabe', 'data-e-feld': 'hinweis', value: g.hinweis || '', autocomplete: 'off', placeholder: 'Ergänzung, z. B. „Boiler oben“', 'aria-label': 'Ergänzung' })));
+    }
+    const kreis = (Verteilerplan.TYPEN[typ] || {}).kreis;
+    inhalt.append(...(kreis ? [...kreisTeil, ...geraetTeil] : [...geraetTeil, ...kreisTeil]));
+
+    const mehrFeld = (titel, el) => h('label', { class: 'feld' }, h('span', null, titel), el);
+    inhalt.append(h('details', { class: 'ed-mehr' }, h('summary', null, 'Mehr'),
+      h('div', { class: 'raster' },
+        typ !== 'LEER' && mehrFeld('Leitung', h('input', { 'data-e-feld': 'leitung', value: g.leitung || '', placeholder: 'z. B. NYM-J 3×1,5 mm²', autocomplete: 'off' })),
+        typ !== 'LEER' && typ !== 'RCD' && mehrFeld('RCD', rcdAuswahl({ 'data-e-feld': 'rcd' }, g.rcd, rcdAnzahl(), 'wie die Reihe')),
+        mehrFeld('Breite (TE)', h('input', { 'data-e-feld': 'te', type: 'number', min: 1, max: 12, inputmode: 'numeric', value: g.te || '', placeholder: String(teVon(g)) })),
+        typ !== 'LEER' && mehrFeld('BMK', h('input', { 'data-e-feld': 'bmk', value: g.bmk || '', placeholder: 'automatisch', autocomplete: 'off' })),
+        typ !== 'LEER' && h('label', { class: 'haken' }, h('input', { type: 'checkbox', 'data-e-feld': 'unsicher', checked: !!g.unsicher }), 'als unsicher markieren')),
+      h('div', { class: 'ed-aktionen' },
+        h('button', { type: 'button', class: 'knopf klein', 'data-e': 'links', disabled: st.gi === 0 }, '◀ nach links'),
+        h('button', { type: 'button', class: 'knopf klein', 'data-e': 'rechts', disabled: st.gi >= plan.reihen[st.ri].geraete.length - 1 }, 'nach rechts ▶'),
+        h('button', { type: 'button', class: 'knopf klein', 'data-e': 'davor' }, 'Freien Platz davor'),
+        typ !== 'LEER' && h('button', { type: 'button', class: 'knopf klein', 'data-e': 'leeren' }, 'Entfernen (Platz bleibt frei)'),
+        h('button', { type: 'button', class: 'knopf klein loeschen', 'data-e': 'weg' }, 'Löschen (Rest rückt nach)'))));
+
+    ed.append(kopf, inhalt);
+    inhalt.scrollTop = fokus ? 0 : scrollAlt;
+    if (fokus === 'text') { const f = ed.querySelector('[data-e-feld="text"]'); if (f) f.focus(); }
+  }
+
+  function waehle(g, fokus) {
+    const neu = auswahl !== g;
+    auswahl = g;
+    zeichneReihen();
+    zeichneEditor(neu ? (fokus || 'oben') : fokus);
+    if (neu) setTimeout(sichtbarMachen, 0);
+  }
+  function sichtbarMachen() {
+    const z = document.querySelector('.zelle.gewaehlt');
+    if (!z) return;
+    const r = z.getBoundingClientRect();
+    const oben = $('.leiste').offsetHeight + 8;
+    const unten = window.innerHeight - ($('#editor').hidden ? 0 : $('#editor').offsetHeight) - 8;
+    if (r.top < oben || r.bottom > unten) window.scrollBy(0, r.top - oben - 40);
+  }
+  function naechster(richtung, nurUnsichere) {
+    const liste = echte().filter(x => !nurUnsichere || x.g.unsicher);
+    if (!liste.length) return null;
+    if (!auswahl) return liste[0].g;
+    const alle = echte(), hier = alle.findIndex(x => x.g === auswahl);
+    const kandidaten = richtung > 0 ? alle.slice(hier + 1) : alle.slice(0, Math.max(0, hier)).reverse();
+    const t = kandidaten.find(x => !nurUnsichere || x.g.unsicher);
+    return t ? t.g : null;
+  }
+
+  function editorKlick(e) {
+    const g = auswahl;
+    if (!g) return;
+    const b = e.target.closest('button');
+    if (!b) return;
+    const d = b.dataset;
+    const st = stelleVon(g);
+    const liste = plan.reihen[st.ri].geraete;
+    if (d.e === 'fertig') { auswahl = null; zeichneReihen(); zeichneEditor(); return; }
+    if (d.e === 'vor' || d.e === 'zurueck') { const n = naechster(d.e === 'vor' ? 1 : -1); if (n) waehle(n); return; }
+    if (d.e === 'ok') {
+      delete g.unsicher; delete g.grund; speichern();
+      const n = naechster(1, true) || naechster(-1, true);
+      if (n) waehle(n); else { zeichneReihen(); zeichneEditor(); }
+      return;
+    }
+    if (d.e === 'links' || d.e === 'rechts') {
+      const j = st.gi + (d.e === 'links' ? -1 : 1);
+      if (j < 0 || j >= liste.length) return;
+      [liste[st.gi], liste[j]] = [liste[j], liste[st.gi]];
+    } else if (d.e === 'davor') {
+      liste.splice(st.gi, 0, { typ: 'LEER', te: 1 });
+      aufraeumen(liste);
+    } else if (d.e === 'leeren') {
+      liste.splice(st.gi, 1, { typ: 'LEER', te: teVon(g) });
+      aufraeumen(liste);
+      auswahl = null;
+    } else if (d.e === 'weg') {
+      liste.splice(st.gi, 1);
+      aufraeumen(liste);
+      auswahl = null;
+    } else if (d.eTyp) setzeTyp(g, d.eTyp);
+    else if (d.eWert) g.wert = d.eWert;
+    else if (d.eArt) setze(g, 'art', g.art === d.eArt ? '' : d.eArt);
+    else if (d.ePole) setzePole(g, d.ePole);
+    else if (d.eText) setze(g, 'text', g.text === d.eText ? '' : d.eText);
+    else if (d.eOrt) textUmschalten(g, d.eOrt, ORTE);
+    else if (d.eRaum) textUmschalten(g, d.eRaum, RAEUME);
+    else if (d.eReserve) { if (g.text === 'Reserve') delete g.text; else { g.text = 'Reserve'; delete g.hinweis; } }
+    else if (d.eVerbr) hinweisUmschalten(g, d.eVerbr);
+    else return;
+    if (auswahl && typVon(auswahl) === 'LEER') auswahl = null;
+    speichern();
+    zeichneReihen();
+    zeichneEditor();
+  }
+
+  function editorEingabe(e) {
+    const t = e.target, f = t.dataset.eFeld, g = auswahl;
+    if (!g || !['wert', 'text', 'hinweis', 'leitung', 'bmk'].includes(f)) return;
+    setze(g, f, t.value.trim() ? t.value : '');
+    speichernSpaeter();
+    zeichneReihen();
+  }
+
+  function editorAenderung(e) {
+    const t = e.target, f = t.dataset.eFeld, g = auswahl;
+    if (!g || !f) return;
+    if (f === 'typ') { if (!t.value) return; setzeTyp(g, t.value); if (typVon(g) === 'LEER') auswahl = null; }
+    else if (f === 'te') { const alt = teVon(g); setze(g, 'te', t.value ? Math.max(1, Math.round(Number(t.value))) : ''); breiteAnpassen(g, alt); }
+    else if (f === 'rcd') setze(g, 'rcd', /^\d+$/.test(t.value) ? Number(t.value) : t.value);
+    else if (f === 'unsicher') {
+      if (t.checked) { g.unsicher = true; g.grund = g.grund || 'von Hand als unsicher markiert'; } else { delete g.unsicher; delete g.grund; }
+    } else return;
+    speichern();
+    zeichneReihen();
+    zeichneEditor();
   }
 
   /* ---------- 3 Plan ---------- */
@@ -334,12 +857,24 @@
     $('#knopf-start').addEventListener('click', () => { fehler(''); zeige('start'); });
 
     document.addEventListener('click', e => {
+      if (e.target.closest('#editor')) return;
+      const gross = e.target.closest('[data-foto-gross]');
+      if (gross) { const f = fotos[Number(gross.dataset.fotoGross)]; if (f) grossZeigen(f.url); return; }
       const ziel = e.target.closest('[data-ziel]');
       if (ziel) { zeige(ziel.dataset.ziel); return; }
+      const platz = e.target.closest('[data-zu-platz]');
+      if (platz) {
+        const [ri, gi] = platz.dataset.zuPlatz.split('.').map(Number);
+        const g = plan.reihen[ri] && plan.reihen[ri].geraete[gi];
+        zeige('verteiler');
+        if (g) waehle(g);
+        return;
+      }
       const a = e.target.closest('[data-aktion]');
       if (!a) return;
       const aktion = a.dataset.aktion;
-      if (aktion === 'bogen') { if (neuBeginnen()) $('#datei-bogen').click(); }
+      if (aktion === 'fotos-neu') { if (neuBeginnen()) { plan = leererPlan(); speichern(); zeige('fotos'); } }
+      else if (aktion === 'bogen') { if (neuBeginnen()) $('#datei-bogen').click(); }
       else if (aktion === 'datei') { if (neuBeginnen()) $('#datei-json').click(); }
       else if (aktion === 'leer') { if (neuBeginnen()) { plan = leererPlan(); speichern(); zeige('daten'); } }
       else if (aktion === 'weiter') { plan = plan || gesichert(); zeige('plan'); }
@@ -347,6 +882,33 @@
 
     $('#datei-bogen').addEventListener('change', e => { const d = e.target.files[0]; e.target.value = ''; if (d) bogenOeffnen(d); });
     $('#datei-json').addEventListener('change', e => { const d = e.target.files[0]; e.target.value = ''; if (d) jsonOeffnen(d); });
+    for (const id of ['#datei-kamera', '#datei-bilder']) {
+      $(id).addEventListener('change', e => { const d = [...e.target.files]; e.target.value = ''; if (d.length) fotosHinzu(d); });
+    }
+
+    // Fotos
+    const fv = $('#ansicht-fotos');
+    fv.addEventListener('click', e => {
+      const weg = e.target.closest('[data-foto-weg]');
+      if (weg) { const [f] = fotos.splice(Number(weg.dataset.fotoWeg), 1); if (f) URL.revokeObjectURL(f.url); fotoMeldung = null; zeichneFotos(); return; }
+      const a = e.target.closest('[data-aktion]');
+      if (!a) return;
+      const aktion = a.dataset.aktion;
+      if (aktion === 'foto-kamera') $('#datei-kamera').click();
+      else if (aktion === 'foto-galerie') $('#datei-bilder').click();
+      else if (aktion === 'foto-auswerten') fotosAuswerten();
+      else if (aktion === 'foto-abbrechen') { if (fotoLauf) fotoLauf.ctrl.abort(); }
+      else if (aktion === 'schluessel-speichern') schluesselSpeichern();
+      else if (aktion === 'schluessel-weg') {
+        if (confirm('API-Schlüssel von diesem Gerät entfernen?')) { try { localStorage.removeItem(SCHLUESSEL); } catch (err) { /* egal */ } zeichneFotos(); }
+      }
+    });
+    fv.addEventListener('input', e => {
+      if (e.target.id === 'foto-hinweis') fotoHinweis = e.target.value;
+      if (e.target.id === 'schluessel-neu') schluesselEntwurf = e.target.value;
+    });
+    fv.addEventListener('change', e => { if (e.target.id === 'foto-sonstige') mitSonstigen = e.target.checked; });
+    fv.addEventListener('keydown', e => { if (e.target.id === 'schluessel-neu' && e.key === 'Enter') schluesselSpeichern(); });
 
     // Daten
     const daten = $('#ansicht-daten');
@@ -367,79 +929,75 @@
 
     // Verteiler
     const vt = $('#ansicht-verteiler');
-    vt.addEventListener('input', e => {
-      const t = e.target, id = t.dataset.g, f = t.dataset.feld;
-      if (!id || !['wert', 'text', 'hinweis', 'leitung'].includes(f)) return;
-      setze(geraetVon(id), f, t.value.trim() ? t.value : '');
-      speichernSpaeter();
-      if (f === 'wert') {
-        const kachel = vt.querySelector(`[data-sprung="${id}"] b`);
-        if (kachel) kachel.textContent = t.value || typVon(geraetVon(id));
-      }
-    });
     vt.addEventListener('change', e => {
       const t = e.target;
-      if (t.dataset.reiheRcd !== undefined) {
-        const r = plan.reihen[Number(t.dataset.reiheRcd)];
-        setze(r, 'rcd', /^\d+$/.test(t.value) ? Number(t.value) : t.value);
-        speichern(); zeichneVerteiler(); return;
-      }
-      const id = t.dataset.g, f = t.dataset.feld;
-      if (!id) return;
-      const g = geraetVon(id);
-      if (f === 'typ') {
-        const alt = typVon(g);
-        g.typ = t.value;
-        delete g.pole;
-        if (t.value !== 'LEER') delete g.te; else g.te = g.te || 1;
-        if (t.value === 'RCD' && alt !== 'RCD') { g.wert = g.wert && /mA/.test(g.wert) ? g.wert : '40 A / 30 mA'; g.art = g.art || 'Typ A'; g.pole = 4; }
-        if (alt === 'RCD' && t.value !== 'RCD' && /mA/.test(g.wert || '')) delete g.wert;
-        if (t.value === 'LEER') { delete g.wert; delete g.text; }
-      } else if (f === 'pole') { setze(g, 'pole', /^\d+$/.test(t.value) ? Number(t.value) : t.value); delete g.te; }
-      else if (f === 'te') setze(g, 'te', t.value ? Math.max(1, Math.round(Number(t.value))) : '');
-      else if (f === 'rcd') setze(g, 'rcd', /^\d+$/.test(t.value) ? Number(t.value) : t.value);
-      else if (f === 'art') setze(g, 'art', t.value);
-      else if (f === 'unsicher') { if (t.checked) g.unsicher = true; else delete g.unsicher; }
-      else return;
-      speichern(); zeichneVerteiler();
+      if (t.dataset.reiheRcd === undefined) return;
+      const r = plan.reihen[Number(t.dataset.reiheRcd)];
+      setze(r, 'rcd', /^\d+$/.test(t.value) ? Number(t.value) : t.value);
+      speichern(); zeichneReihen(); zeichneEditor();
     });
     vt.addEventListener('click', e => {
-      const sprung = e.target.closest('[data-sprung]');
-      if (sprung) {
-        const karte = vt.querySelector(`[data-geraet="${sprung.dataset.sprung}"]`);
-        if (karte) {
-          karte.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          karte.classList.add('markiert');
-          setTimeout(() => karte.classList.remove('markiert'), 1600);
-        }
+      const wahl = e.target.closest('[data-wahl]');
+      if (wahl) {
+        const [ri, gi] = wahl.dataset.wahl.split('.').map(Number);
+        const g = plan.reihen[ri].geraete[gi];
+        if (auswahl === g) { auswahl = null; zeichneReihen(); zeichneEditor(); } else waehle(g);
         return;
       }
-      const hinzu = e.target.closest('[data-hinzu]');
-      if (hinzu) {
-        const ri = Number(hinzu.dataset.r);
-        plan.reihen[ri].geraete.push(neuesGeraet(hinzu.dataset.hinzu));
-        speichern(); zeichneVerteiler();
-        const neu = vt.querySelector(`[data-geraet="${ri}.${plan.reihen[ri].geraete.length - 1}"] [data-feld="text"]`);
-        if (neu && !neu.disabled) neu.focus();
+      const frei = e.target.closest('[data-frei]');
+      if (frei) {
+        const [ri, gi, k] = frei.dataset.frei.split('.').map(Number);
+        const liste = plan.reihen[ri].geraete, leer = liste[gi], te = teVon(leer);
+        const neu = neuesLs();
+        const ersatz = [];
+        if (k > 0) ersatz.push({ typ: 'LEER', te: k });
+        ersatz.push(neu);
+        if (te - k - 1 > 0) ersatz.push({ typ: 'LEER', te: te - k - 1 });
+        liste.splice(gi, 1, ...ersatz);
+        speichern(); waehle(neu);
+        return;
+      }
+      const ende = e.target.closest('[data-ende]');
+      if (ende) {
+        const [ri, k] = ende.dataset.ende.split('.').map(Number);
+        const liste = plan.reihen[ri].geraete, neu = neuesLs();
+        if (k > 0) liste.push({ typ: 'LEER', te: k });
+        liste.push(neu);
+        aufraeumen(liste);
+        speichern(); waehle(neu);
         return;
       }
       const a = e.target.closest('[data-aktion]');
       if (!a) return;
       const aktion = a.dataset.aktion;
-      if (aktion === 'reihe-neu') { plan.reihen.push({ geraete: [] }); speichern(); zeichneVerteiler(); return; }
+      if (aktion === 'reihe-neu') { plan.reihen.push({ geraete: [] }); speichern(); zeichneReihen(); return; }
       if (aktion === 'reihe-weg') {
         const ri = Number(a.dataset.r);
         if (plan.reihen[ri].geraete.length && !confirm(`Reihe ${ri + 1} mit allen Geräten löschen?`)) return;
-        plan.reihen.splice(ri, 1); speichern(); zeichneVerteiler(); return;
+        plan.reihen.splice(ri, 1);
+        if (!plan.reihen.length) plan.reihen.push({ geraete: [] });
+        speichern(); zeichneReihen(); zeichneEditor(); return;
       }
-      if (!a.dataset.g) return;
-      const [ri, gi] = a.dataset.g.split('.').map(Number);
-      const liste = plan.reihen[ri].geraete;
-      if (aktion === 'weg') liste.splice(gi, 1);
-      else if (aktion === 'hoch' && gi > 0) [liste[gi - 1], liste[gi]] = [liste[gi], liste[gi - 1]];
-      else if (aktion === 'runter' && gi < liste.length - 1) [liste[gi + 1], liste[gi]] = [liste[gi], liste[gi + 1]];
-      else return;
-      speichern(); zeichneVerteiler();
+      if (aktion === 'reihe-fuellen') {
+        const liste = plan.reihen[Number(a.dataset.r)].geraete;
+        const frei = breite() - liste.reduce((s, g) => s + teVon(g), 0);
+        const wert = letzterLsWert();
+        for (let i = 0; i < frei; i++) liste.push({ typ: 'LS', wert });
+        speichern(); zeichneReihen(); zeichneEditor(); return;
+      }
+      if (aktion === 'naechster-unsicher') { const n = naechster(1, true) || naechster(-1, true); if (n) waehle(n); }
+    });
+
+    // Editor
+    const ed = $('#editor');
+    ed.addEventListener('click', editorKlick);
+    ed.addEventListener('input', editorEingabe);
+    ed.addEventListener('change', editorAenderung);
+    ed.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' || e.target.dataset.eFeld !== 'text') return;
+      e.preventDefault();
+      const n = naechster(1);
+      if (n) waehle(n, 'text'); else e.target.blur();
     });
 
     // Plan
@@ -453,12 +1011,6 @@
     window.addEventListener('resize', () => { if (ansicht === 'plan') skalieren(); });
   }
 
-  function wertlistenAnlegen() {
-    for (const [name, werte] of Object.entries(WERTE)) {
-      document.body.append(h('datalist', { id: 'werte-' + name }, werte.map(w => h('option', { value: w }))));
-    }
-  }
-
   async function starten() {
     try {
       FIRMA = await (await fetch('firma.json', { cache: 'no-cache' })).json();
@@ -468,7 +1020,6 @@
     LOGO = FIRMA.logo || '';
     plan = gesichert();
     if (plan && !Array.isArray(plan.reihen)) plan = null;
-    wertlistenAnlegen();
     verdrahten();
     // index.html#plan oeffnet direkt den zuletzt bearbeiteten Plan
     zeige(location.hash === '#plan' && plan ? 'plan' : 'start');

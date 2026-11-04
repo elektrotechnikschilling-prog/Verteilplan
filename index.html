@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0f172a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Verteilerplan">
@@ -15,6 +15,7 @@
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" defer></script>
 <script src="plan.js" defer></script>
 <script src="bogen-import.js" defer></script>
+<script src="foto-ki.js" defer></script>
 <script src="app.js" defer></script>
 </head>
 <body>
@@ -34,9 +35,13 @@
   <section id="ansicht-start" class="ansicht">
     <div class="start">
       <h1>Verteilerplan erstellen</h1>
-      <p class="start-text">Aus dem in Craftnote ausgefüllten Aufnahmebogen wird hier der fertige Verteilerplan. Alles bleibt auf diesem Gerät – es wird nichts hochgeladen.</p>
+      <p class="start-text">Verteiler fotografieren oder den Aufnahmebogen aus Craftnote öffnen – hier wird daraus der fertige Verteilerplan. Der Plan bleibt auf diesem Gerät; nur zur Fotoauswertung gehen die Fotos an die KI.</p>
       <div class="start-wahl">
-        <button type="button" class="kachel haupt" data-aktion="bogen">
+        <button type="button" class="kachel haupt" data-aktion="fotos-neu">
+          <b>Verteiler fotografieren</b>
+          <small>Die KI erkennt Geräte und Plätze – du prüfst und ergänzt per Antippen</small>
+        </button>
+        <button type="button" class="kachel" data-aktion="bogen">
           <b>Aufnahmebogen öffnen</b>
           <small>Die in Craftnote ausgefüllte PDF auswählen</small>
         </button>
@@ -57,6 +62,7 @@
     </div>
   </section>
 
+  <section id="ansicht-fotos" class="ansicht" hidden></section>
   <section id="ansicht-daten" class="ansicht" hidden></section>
   <section id="ansicht-verteiler" class="ansicht" hidden></section>
 
@@ -72,7 +78,11 @@
   </section>
 </main>
 
+<div id="editor" class="editor" role="dialog" aria-label="Platz bearbeiten" hidden></div>
+
 <input type="file" id="datei-bogen" accept="application/pdf,.pdf" hidden>
 <input type="file" id="datei-json" accept="application/json,.json" hidden>
+<input type="file" id="datei-kamera" accept="image/*" capture="environment" hidden>
+<input type="file" id="datei-bilder" accept="image/*" multiple hidden>
 </body>
 </html>

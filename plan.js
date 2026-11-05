@@ -12,7 +12,7 @@
 
   // bmk = Kennbuchstabe nach DIN EN IEC 81346-2, pole/te = Standardwerte, kreis = eigener Stromkreis
   const TYPEN = {
-    RCD:     { kurz: 'RCD',    lang: 'Fehlerstrom-Schutzschalter (FI)',        bmk: 'F', pole: 4 },
+    RCD:     { kurz: 'RCD',    lang: 'Fehlerstrom-Schutzschalter (FI)',        bmk: 'Q', pole: 4 },
     LS:      { kurz: 'LS',     lang: 'Leitungsschutzschalter',                 bmk: 'F', pole: 1, kreis: true },
     FILS:    { kurz: 'FI/LS',  lang: 'FI/LS-Schalter (RCBO)',                  bmk: 'F', pole: '1+N', kreis: true },
     AFDD:    { kurz: 'AFDD',   lang: 'Brandschutzschalter',                    bmk: 'F', pole: '1+N', kreis: true },
@@ -120,7 +120,7 @@
         g.von = start + belegt;
         g.bis = g.von + g.te - 1;
         g.nr = g.nr != null && g.nr !== '' ? String(g.nr) : spanne(g.von, g.bis);
-        g.bmk = g.bmk != null && g.bmk !== '' ? String(g.bmk) : (g.T.bmk ? '-' + g.T.bmk + g.von : '');
+        g.bmk = g.bmk != null && g.bmk !== '' ? String(g.bmk).trim().replace(/^([A-Z]+\d+)$/i, '-$1') : null;   // sonst automatisch, siehe unten
         g.reserve = g.reserve === true || /^reserve$/i.test(g.text || '');
         belegt += g.te;
         if (g.typ === 'RCD') { rcds.push(g); g.gruppe = rcds.length; }
@@ -132,6 +132,21 @@
       }
       r.spalten = Math.max(belegt, r.breite);
       start += r.breite;
+    }
+
+    // BMK: je Kennbuchstabe fortlaufend gezählt, ein Gerät = eine Nummer (-F1, -F2 …, RCD -Q1, -Q2 …),
+    // unabhängig von der Platznummer. Von Hand vergebene Kennzeichen bleiben und werden übersprungen.
+    const bmkSchluessel = b => String(b).replace(/\s/g, '').toUpperCase().replace(/^(?!-)/, '-');
+    const vergeben = new Set(reihen.flatMap(r => r.geraete).filter(g => g.bmk).map(g => bmkSchluessel(g.bmk)));
+    const zaehler = {};
+    for (const r of reihen) for (const g of r.geraete) {
+      if (g.bmk) continue;
+      const b = g.T.bmk;
+      if (!b) { g.bmk = ''; continue; }
+      let n = zaehler[b] || 0;
+      do n++; while (vergeben.has(`-${b}${n}`));
+      zaehler[b] = n;
+      g.bmk = `-${b}${n}`;
     }
 
     function rcdNummer(v, wo) {
@@ -323,7 +338,7 @@
         h('span', null, h('small', null, `ohne RCD: Nr. ${bereiche(ohne)}`))));
 
       const kurz = [['Nr.', 'Platz im Verteiler (Teilungseinheit), gezählt von links nach rechts, Reihe 1 oben']];
-      if (MIT_BMK) kurz.push(['BMK', 'Betriebsmittelkennzeichen']);
+      if (MIT_BMK) kurz.push(['BMK', 'Betriebsmittelkennzeichen, je Kennbuchstabe fortlaufend gezählt']);
       const genutzt = [...new Set(alle.map(g => g.typ))].filter(t => TYPEN[t].kurz);
       for (const t of genutzt) kurz.push([TYPEN[t].kurz, TYPEN[t].lang]);
       const bsp = alle.map(g => /^([A-Z])\s?(\d+)$/.exec(g.T.kreis && g.wert || '')).find(Boolean);

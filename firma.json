@@ -17,6 +17,7 @@
   "farbe_dunkel": "#0f172a",
 
   "bmk": true,
+  "beschriftung": { "te_mm": 17.82, "rcd_te_mm": 17.39, "hoehe_mm": 10.25 },
   "hinweis": "Arbeiten an elektrischen Anlagen dürfen nur von Elektrofachkräften ausgeführt werden. Änderungen an der Anlage bitte in diesem Plan nachtragen lassen.",
   "normhinweis": "Stromkreisverzeichnis in Anlehnung an DIN VDE 0100-510, Abschnitt 514.5 · Betriebsmittelkennzeichen nach DIN EN IEC 81346-2"
 }

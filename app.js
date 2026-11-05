@@ -38,6 +38,7 @@
   let FIRMA = {}, LOGO = '';
   let plan = null;
   let ansicht = 'start';
+  let planArt = 'plan';          // Plan-Ansicht zeigt 'plan' oder 'beschriftung' (Streifen zum Ausschneiden)
   let auswahl = null;            // Geraet (Objekt aus plan.reihen), das im Editor offen ist
   let fotos = [];                // vorbereitete Fotos, nur im Speicher
   let fotoHinweis = '', mitSonstigen = false, fotoVorbereitung = false;
@@ -824,6 +825,8 @@
     if (ansicht !== 'plan') return;
     const daten = KOPIE(plan);
     if (!daten.datum) daten.datum = heute();
+    daten.beschriftung = planArt === 'beschriftung';
+    document.querySelectorAll('#plan-art button').forEach(b => b.classList.toggle('an', b.dataset.planart === planArt));
     const erg = Verteilerplan.zeichne($('#druck'), FIRMA, daten, LOGO);
     status.textContent = '';
     if (erg.warnungen.length) {
@@ -832,6 +835,9 @@
     } else if (erg.offen.length) {
       status.className = 'status entwurf';
       status.append(`Entwurf – ${erg.offen.length} offene${erg.offen.length === 1 ? 'r Punkt' : ' Punkte'}`, h('button', { type: 'button', 'data-ziel': 'daten' }, 'Ansehen'));
+    } else if (planArt === 'beschriftung') {
+      status.className = 'status gut';
+      status.textContent = 'Originalgröße – beim Drucken Skalierung 100 % wählen';
     } else {
       status.className = 'status gut';
       status.textContent = 'Fertig – bereit zum Speichern';
@@ -841,7 +847,7 @@
 
   function skalieren() {
     const rahmen = $('#vorschau-rahmen'), vorschau = $('#vorschau');
-    const blatt = 210 * 96 / 25.4;
+    const blatt = (planArt === 'beschriftung' ? 297 : 210) * 96 / 25.4;
     const s = Math.min(1, vorschau.clientWidth / blatt);
     rahmen.style.width = blatt + 'px';
     rahmen.style.transform = `scale(${s})`;
@@ -1001,9 +1007,15 @@
     });
 
     // Plan
+    $('#plan-art').addEventListener('click', e => {
+      const b = e.target.closest('button[data-planart]');
+      if (!b || b.dataset.planart === planArt) return;
+      planArt = b.dataset.planart;
+      zeichnePlan();
+    });
     $('#knopf-drucken').addEventListener('click', () => {
       const titel = document.title;
-      document.title = dateiname();
+      document.title = planArt === 'beschriftung' ? dateiname().replace(/^Verteilerplan/, 'Beschriftung') : dateiname();
       window.print();
       setTimeout(() => { document.title = titel; }, 1500);
     });

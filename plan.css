@@ -203,3 +203,22 @@
 .vp .fusszeile.mit-link { align-items: center; padding-top: 1.4mm; }
 .vp .app-link { display: inline-block; padding: 1mm 3.2mm; border-radius: 99px; background: var(--dunkel); color: #fff; font-size: 7.8pt; font-weight: 700; text-decoration: none; }
 .vp .app-url { margin-left: 2.2mm; color: var(--grau); }
+
+/* ---------- Beschriftungsstreifen (A4 quer, Originalgroesse - Masse kommen aus plan.js) ---------- */
+.vp.quer .blatt { width: 297mm; height: 209.6mm; padding: 10mm 12mm 8mm; }
+.vp .bs-tipp { flex: none; margin: 3mm 0 0; font-size: 8pt; color: var(--grau); }
+.vp .bs-tipp b { color: var(--dunkel); }
+.vp.beschriftung .rumpf > * { margin-top: 6mm; }
+.vp .bs-zeile { display: grid; grid-template-columns: 26mm minmax(0, 1fr); column-gap: 4mm; align-items: start; }
+.vp .bs-zeile > div:last-child { display: flex; flex-direction: column; gap: 4mm; }
+.vp .bs-name { min-height: 10mm; display: flex; flex-direction: column; justify-content: center; line-height: 1.2; }
+.vp .bs-name b { font-size: 9pt; color: var(--dunkel); }
+.vp .bs-name small { font-size: 7pt; color: var(--grau); }
+.vp .bs-streifen, .vp .bs-mass { display: block; flex: none; overflow: visible; }
+.vp .bs-rand { fill: none; stroke: #1a2330; stroke-width: .25; }
+.vp .bs-trenner { stroke: #8b96a3; stroke-width: .2; stroke-dasharray: .8 .6; }
+.vp .bs-streifen text { font-family: Barlow, Bahnschrift, Arial, sans-serif; font-weight: 700; fill: #000; text-anchor: middle; dominant-baseline: central; }
+.vp.beschriftung .rumpf > .bs-pruef { margin-top: auto; padding-top: 6mm; font-size: 7.5pt; color: var(--grau); }
+.vp .bs-pruef b { color: var(--dunkel); }
+.vp .bs-mass { margin-bottom: 1.6mm; }
+.vp .bs-mass line { stroke: #000; stroke-width: .25; }

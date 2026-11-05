@@ -4,7 +4,8 @@
    Verteilerplan.zeichne(ziel, firma, plan, logo) -> { titel, warnungen, offen }
      ziel  : leeres Element im Dokument; es bekommt die Klasse .vp und die A4-Blaetter
      firma : Inhalt von firma.json
-     plan  : Plan-Daten (Format siehe CLAUDE.md); { aufnahmebogen: true } zeichnet den leeren Bogen
+     plan  : Plan-Daten (Format siehe CLAUDE.md); { aufnahmebogen: true } zeichnet den leeren Bogen,
+             mit beschriftung: true werden statt des Plans die Beschriftungsstreifen gezeichnet
      logo  : Bild-Adresse (URL oder data:-URI) oder ''
    Vorher Verteilerplan.schriftenLaden() abwarten, sonst wird mit der Ersatzschrift gemessen. */
 (function (global) {
@@ -492,7 +493,97 @@
       return { titel: 'Elektroverteiler Aufnahmebogen', warnungen: [], offen: [] };
     }
 
-    return PLAN.aufnahmebogen ? aufnahmebogen() : plan();
+    /* ================= Beschriftungsstreifen ================= */
+    // Streifen zum Ausschneiden fuer die Beschriftungsleiste im Verteiler, in Originalgroesse (A4 quer).
+    // Masse aus firma.json "beschriftung" - ausgemessen an der bewaehrten Excel-Vorlage fuer Hager:
+    // ein Platz 17,82 mm, ein RCD (ein Gehaeuse) etwas schmaler je Platz, Streifenhoehe 10,25 mm.
+    function beschriftung() {
+      const M = Object.assign({ te_mm: 17.82, rcd_te_mm: 17.39, hoehe_mm: 10.25 }, FIRMA.beschriftung || {});
+      const NUTZ = 297 - 2 * 12 - 26 - 4;   // Blattbreite - Raender - Reihenbezeichnung - Abstand
+      const zahl = v => (Math.round(v * 100) / 100).toLocaleString('de-DE');
+      ziel.classList.add('quer', 'beschriftung');
+
+      // Felder je Reihe: ein Feld je Geraet, freie Plaetze einzeln
+      const felderVon = r => r.geraete.flatMap(g => g.typ === 'LEER'
+        ? Array.from({ length: g.te }, () => ({ mm: M.te_mm, text: '', leer: true }))
+        : [{ mm: g.te * (g.typ === 'RCD' ? M.rcd_te_mm : M.te_mm), text: String(g.bmk || '').replace(/^-/, ''), unsicher: g.unsicher }]);
+      // Als SVG in Millimetern: HTML-Rahmen rundet der Browser auf ganze Pixel (bis 0,2 mm Abweichung).
+      // Die Schnittlinie liegt mittig auf dem exakten Rand.
+      const svg = (tag, attrs, text) => {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        // Breite und Hoehe getrennt skalieren: sonst schrumpft die Breite mit der vom Browser gerundeten Hoehe
+        if (tag === 'svg') el.setAttribute('preserveAspectRatio', 'none');
+        for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+        if (text != null) el.textContent = text;
+        return el;
+      };
+      function streifen(felder) {
+        const B = felder.reduce((s, f) => s + f.mm, 0), H = M.hoehe_mm;
+        const s = svg('svg', { class: 'bs-streifen', width: B + 'mm', height: H + 'mm', viewBox: `0 0 ${B} ${H}` });
+        let x = 0;
+        felder.forEach((f, i) => {
+          if (i) s.append(svg('line', { class: 'bs-trenner', x1: x, y1: 0, x2: x, y2: H }));
+          if (f.text) {
+            const gr = f.text.length > 22 ? 3 : 3.88;   // 11 pt, lange Namen 8,5 pt
+            const t = svg('text', { x: x + f.mm / 2, y: H / 2, 'font-size': gr }, f.text);
+            if (f.text.length * .6 * gr > f.mm - 1.6) { t.setAttribute('textLength', f.mm - 1.6); t.setAttribute('lengthAdjust', 'spacingAndGlyphs'); }
+            s.append(t);
+          }
+          x += f.mm;
+        });
+        s.append(svg('rect', { class: 'bs-rand', x: 0, y: 0, width: B, height: H }));
+        return s;
+      }
+      // Zu lange Reihen (mehr als auf das Blatt passt) an Geraetegrenzen umbrechen
+      function teilen(felder) {
+        const teile = [[]];
+        let summe = 0;
+        for (const f of felder) {
+          if (summe + f.mm > NUTZ && teile[teile.length - 1].length) { teile.push([]); summe = 0; }
+          teile[teile.length - 1].push(f); summe += f.mm;
+        }
+        return teile;
+      }
+      const zeile = (titel, unter, ...inhalt) => h('section', { class: 'bs-zeile' },
+        h('div', { class: 'bs-name' }, h('b', null, titel), unter && h('small', null, unter)), h('div', null, inhalt));
+
+      const bloecke = [];
+      const name = [PLAN.verteiler, PLAN.standort].filter(Boolean).join(' ');
+      if (name) bloecke.push(zeile('Verteiler', null,
+        streifen([{ mm: 4 * M.rcd_te_mm, text: name.toLocaleUpperCase('de-DE') }])));
+      for (const r of reihen) {
+        bloecke.push(zeile('Reihe ' + r.nr, `Platz ${spanne(r.von, r.von + r.spalten - 1)}`, teilen(felderVon(r)).map(streifen)));
+      }
+      const pruefmass = h('section', { class: 'bs-pruef' },
+        (() => {
+          const s = svg('svg', { class: 'bs-mass', width: '100mm', height: '3mm', viewBox: '0 0 100 3' });
+          s.append(svg('line', { x1: 0, y1: 3, x2: 100, y2: 3 }));
+          for (let i = 0; i <= 10; i++) s.append(svg('line', { x1: i * 10, y1: i % 10 ? 1.2 : 0, x2: i * 10, y2: 3 }));
+          return s;
+        })(),
+        h('div', null, h('b', null, 'Prüfmaß 100 mm'), ' – vor dem Ausschneiden nachmessen. ',
+          `Maße: 1 Platz ${zahl(M.te_mm)} mm · RCD 4 Plätze ${zahl(4 * M.rcd_te_mm)} mm · Höhe ${zahl(M.hoehe_mm)} mm`));
+
+      const kopftext = [OFFEN.length ? 'ENTWURF – Beschriftung' : 'Beschriftungsstreifen', PLAN.kunde, name].filter(Boolean).join(' · ');
+      function neuesQuerblatt() {
+        const rumpf = h('main', { class: 'rumpf' });
+        ziel.append(h('section', { class: 'blatt' }, kopfKlein(kopftext),
+          h('p', { class: 'bs-tipp' }, h('b', null, 'In Originalgröße drucken: '),
+            'Skalierung 100 % bzw. „Tatsächliche Größe“, nicht „An Seite anpassen“. Entlang der durchgezogenen Linie ausschneiden.'),
+          rumpf));
+        return rumpf;
+      }
+      let rumpf = neuesQuerblatt();
+      for (const b of [...bloecke, pruefmass]) {
+        rumpf.append(b);
+        if (!passt(rumpf) && rumpf.children.length > 1) { rumpf = neuesQuerblatt(); rumpf.append(b); }
+      }
+      // Querformat nur fuer dieses Dokument; das Element verschwindet mit dem naechsten zeichne()
+      ziel.append(h('style', null, '@page { size: A4 landscape; margin: 0; }'));
+      return { titel: kopftext.replace(/ · /g, ' – '), warnungen, offen: OFFEN };
+    }
+
+    return PLAN.aufnahmebogen ? aufnahmebogen() : PLAN.beschriftung ? beschriftung() : plan();
   }
 
   global.Verteilerplan = { zeichne, schriftenLaden, teVon, TYPEN, datumText };

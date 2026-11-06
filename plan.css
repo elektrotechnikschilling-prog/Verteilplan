@@ -23,7 +23,7 @@
   --zeile: 5.4mm;
   --streifen: 11.5mm;
   --abstand: 4.2mm;
-  --spalten: 3.2em 2.3em 3.9em minmax(0, 1fr) 1.5em;
+  --spalten: 2.7em 3em 3.9em minmax(0, 1fr) 1.5em;
   font-family: Barlow, Bahnschrift, "Segoe UI", Arial, sans-serif;
   font-size: 9pt;
   line-height: 1.25;
@@ -125,8 +125,10 @@
 
 .vp .liste { display: grid; grid-template-columns: 1fr 1fr; column-gap: 5mm; align-items: start; margin-top: 1.2mm; }
 .vp .eintrag { display: grid; grid-template-columns: var(--spalten); column-gap: 1.2mm; align-items: center; min-height: var(--zeile); padding: .3mm 0; border-bottom: .2mm solid var(--linie); font-size: var(--fs); }
-.vp .e-nr { padding-left: .8mm; font-weight: 700; color: var(--dunkel); white-space: nowrap; }
-.vp .e-bmk { font-size: .74em; color: var(--grau); white-space: nowrap; }
+/* Wichtig fuer den Kunden ist das Kennzeichen (wie auf dem Beschriftungsstreifen), nicht die Platznummer */
+.vp .e-nr { padding-left: .8mm; font-size: .78em; color: var(--grau); white-space: nowrap; }
+.vp .e-bmk { font-size: 1.08em; font-weight: 700; line-height: 1.05; color: var(--dunkel); white-space: nowrap; }
+.vp.ohne-bmk .e-nr, .vp.bogen .e-nr { font-size: 1em; font-weight: 700; color: var(--dunkel); }
 .vp .e-schutz b { font-weight: 700; white-space: nowrap; }
 .vp .e-schutz small { margin-left: .25em; font-size: .72em; color: var(--grau); }
 .vp .e-text { min-width: 0; line-height: 1.15; overflow-wrap: anywhere; font-family: "Barlow Semi Condensed", Barlow, Bahnschrift, sans-serif; font-weight: 500; }

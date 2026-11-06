@@ -254,7 +254,7 @@
 
     function spaltenkopf() {
       const eine = () => h('div', null,
-        h('span', null, 'Nr.'), MIT_BMK && h('span', null, 'BMK'), h('span', null, 'Schutz'),
+        h('span', null, 'Platz'), MIT_BMK && h('span', null, 'BMK'), h('span', null, 'Schutz'),
         h('span', null, 'Stromkreis / Verbraucher'), h('span', null, 'RCD'));
       return h('div', { class: 'spaltenkopf' }, eine(), eine());
     }
@@ -284,7 +284,7 @@
       const a = anzeige(g);
       const el = h('div', { class: 'eintrag' + (g.typ === 'RCD' ? ' ist-rcd' : '') + (g.reserve ? ' reserve' : '') + (g.unsicher ? ' unsicher' : '') },
         h('span', { class: 'e-nr' }, g.nr),
-        MIT_BMK && h('span', { class: 'e-bmk' }, g.bmk),
+        MIT_BMK && h('span', { class: 'e-bmk' }, String(g.bmk || '').replace(/^-/, '')),   // so wie auf dem Streifen
         h('span', { class: 'e-schutz' }, h('b', null, a.haupt), a.neben && h('small', null, a.neben)),
         h('span', { class: 'e-text' }, a.text, a.detail.length ? h('span', { class: 'e-detail' }, a.detail.join(' · ')) : null),
         h('span', { class: 'e-rcd' }, punkt(g)));
@@ -315,6 +315,20 @@
       }
       return aus.map(b => spanne(b[0], b[1])).join(', ');
     }
+    // Fuer den Kunden lesbar: die Kennzeichen wie auf dem Beschriftungsstreifen (F13–F20, F25),
+    // ohne BMK-Spalte die Platznummern
+    function geraeteText(geraete) {
+      if (!MIT_BMK) return 'Nr. ' + bereiche(geraete);
+      const aus = [];
+      for (const g of [...geraete].sort((a, b) => a.von - b.von)) {
+        const k = String(g.bmk || '').replace(/^-/, '');
+        const m = /^([A-Z]+)(\d+)$/i.exec(k);
+        const letzter = aus[aus.length - 1];
+        if (m && letzter && letzter.b === m[1] && Number(m[2]) === letzter.bis + 1) { letzter.bis++; continue; }
+        aus.push(m ? { b: m[1], von: Number(m[2]), bis: Number(m[2]) } : { text: k || 'Platz ' + g.nr });
+      }
+      return aus.map(x => x.text || (x.von === x.bis ? x.b + x.von : `${x.b}${x.von}–${x.b}${x.bis}`)).join(', ');
+    }
 
     function legende() {
       const links = h('div', null, h('h3', null, 'Fehlerstrom-Schutz (RCD)'));
@@ -324,7 +338,7 @@
           h('span', { class: 'punkt', style: `--gruppe:${gruppenFarbe(r.gruppe)}` }, r.gruppe),
           h('span', null, h('b', null, 'RCD ' + r.gruppe),
             ' ' + [r.wert, r.art].filter(Boolean).join(' · ') + ' ',
-            h('small', null, geschuetzt.length ? `– schützt Nr. ${bereiche(geschuetzt)}` : '– keine Stromkreise zugeordnet'))));
+            h('small', null, geschuetzt.length ? `– schützt ${geraeteText(geschuetzt)}` : '– keine Stromkreise zugeordnet'))));
       }
       if (alle.some(g => g.gruppe === 'eigen')) links.append(h('div', { class: 'l-rcd' },
         h('span', { class: 'punkt', style: `--gruppe:${gruppenFarbe('eigen')}` }, 'Δ'),
@@ -332,14 +346,15 @@
       const fraglich = alle.filter(g => g.gruppe === 'offen');
       if (fraglich.length) links.append(h('div', { class: 'l-rcd' },
         h('span', { class: 'punkt fraglich' }, '?'),
-        h('span', null, h('small', null, `RCD-Zuordnung noch offen: Nr. ${bereiche(fraglich)}`))));
+        h('span', null, h('small', null, `RCD-Zuordnung noch offen: ${geraeteText(fraglich)}`))));
       const ohne = alle.filter(g => g.T.kreis && !g.gruppe);
       if (ohne.length) links.append(h('div', { class: 'l-rcd' },
         h('span', { class: 'punkt ohne' }, '–'),
-        h('span', null, h('small', null, `ohne RCD: Nr. ${bereiche(ohne)}`))));
+        h('span', null, h('small', null, `ohne RCD: ${geraeteText(ohne)}`))));
 
-      const kurz = [['Nr.', 'Platz im Verteiler (Teilungseinheit), gezählt von links nach rechts, Reihe 1 oben']];
-      if (MIT_BMK) kurz.push(['BMK', 'Betriebsmittelkennzeichen, je Kennbuchstabe fortlaufend gezählt']);
+      const kurz = [];
+      if (MIT_BMK) kurz.push(['BMK', 'Kennzeichen wie auf dem Beschriftungsstreifen, je Buchstabe fortlaufend gezählt']);
+      kurz.push(['Platz', 'Teilungseinheit im Verteiler, von links nach rechts, Reihe 1 oben']);
       const genutzt = [...new Set(alle.map(g => g.typ))].filter(t => TYPEN[t].kurz);
       for (const t of genutzt) kurz.push([TYPEN[t].kurz, TYPEN[t].lang]);
       const bsp = alle.map(g => /^([A-Z])\s?(\d+)$/.exec(g.T.kreis && g.wert || '')).find(Boolean);
